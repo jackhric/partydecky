@@ -159,6 +159,11 @@ def create_profile(name: str) -> list[dict]:
     return list_profiles()
 
 
+def delete_profile(name: str) -> list[dict]:
+    _run_partydeck("profile", "delete", name)
+    return list_profiles()
+
+
 def _sha256(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:

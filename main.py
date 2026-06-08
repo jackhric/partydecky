@@ -106,6 +106,11 @@ class Plugin:
             None, partydeck.create_profile, name
         )
 
+    async def delete_profile(self, name: str) -> list:
+        return await self.loop.run_in_executor(
+            None, partydeck.delete_profile, name
+        )
+
     # Live input monitor: streams 'partydeck_input' events ({path, button}) from
     # `partydeck monitor-input` until stopped.
 

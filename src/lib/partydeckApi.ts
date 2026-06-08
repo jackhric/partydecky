@@ -36,6 +36,9 @@ export const listDevices = callable<[filter: DeviceFilter], Device[]>(
 export const createProfile = callable<[name: string], Profile[]>(
   "create_profile",
 );
+export const deleteProfile = callable<[name: string], Profile[]>(
+  "delete_profile",
+);
 
 export const startInputMonitor = callable<
   [filter: DeviceFilter],
