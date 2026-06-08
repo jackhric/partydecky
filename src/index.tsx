@@ -19,6 +19,7 @@ import {
   unpatchShortcutRedirect,
 } from "./patches/ShortcutRedirectPatch";
 import { registerGameSettingsRoute } from "./routes/GameSettingsRoute";
+import { HeadlessQueryPanel } from "./components/HeadlessQueryPanel";
 
 // Calls the Python method `say_hello(name)` on the backend and returns its
 // string result. The first type arg is the argument tuple, the second is the
@@ -50,6 +51,7 @@ function Content() {
           Ping me in 3s (backend event)
         </ButtonItem>
       </PanelSectionRow>
+      <HeadlessQueryPanel />
     </PanelSection>
   );
 }

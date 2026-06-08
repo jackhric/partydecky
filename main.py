@@ -88,6 +88,24 @@ class Plugin:
         # Cheap: ensures handlers/settings/launcher exist, returns paths.
         return await self.loop.run_in_executor(None, partydeck.get_launcher_info)
 
+    # ── Headless queries (read PartyDeck state via the binary) ───────
+    # Each shells out to a display-free headless subcommand and parses JSON.
+    # Run in the executor so the subprocess doesn't block the event loop.
+
+    async def list_profiles(self) -> list:
+        return await self.loop.run_in_executor(None, partydeck.list_profiles)
+
+    async def list_handlers(self) -> list:
+        return await self.loop.run_in_executor(None, partydeck.list_handlers)
+
+    async def list_devices(self) -> list:
+        return await self.loop.run_in_executor(None, partydeck.list_devices)
+
+    async def create_profile(self, name: str) -> list:
+        return await self.loop.run_in_executor(
+            None, partydeck.create_profile, name
+        )
+
     # Runs once when the plugin is loaded. Long-running async setup goes here.
     async def _main(self) -> None:
         self.loop = asyncio.get_event_loop()

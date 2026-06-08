@@ -21,8 +21,10 @@ command-building stays in the upstream binary.
 """
 
 import hashlib
+import json
 import os
 import shutil
+import subprocess
 import tarfile
 import urllib.request
 from pathlib import Path
@@ -94,6 +96,84 @@ def _binary_path() -> Path:
 
 def is_binary_installed() -> bool:
     return _binary_path().is_file() and os.access(_binary_path(), os.X_OK)
+
+
+# ── Headless queries ─────────────────────────────────────────────────
+# These shell out to PartyDeck's headless subcommands (profile/handler/devices),
+# which print JSON to stdout and need NO display — so they're safe to call from
+# the backend (which has no graphical session). PartyDeck stays the single
+# source of truth for its on-disk formats; we just parse what it reports.
+
+
+def _run_partydeck_json(*args: str) -> object:
+    """Run `partydeck <args>` and parse its JSON stdout.
+
+    Raises RuntimeError on a missing binary or non-zero exit (stderr included),
+    so the frontend surfaces a real error instead of silently getting nothing.
+    The binary resolves its data dir via $HOME, so we pass an explicit HOME —
+    Decky's backend environment may not carry the deck user's.
+    """
+    binary = _binary_path()
+    if not is_binary_installed():
+        raise RuntimeError(f"PartyDeck binary not installed at {binary}")
+
+    env = {**os.environ, "HOME": str(_home())}
+    proc = subprocess.run(  # noqa: S603 (fixed binary, no shell)
+        [str(binary), *args],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    if proc.returncode != 0:
+        msg = proc.stderr.strip() or f"exit {proc.returncode}"
+        decky.logger.error("partydeck %s failed: %s", " ".join(args), msg)
+        raise RuntimeError(f"partydeck {' '.join(args)} failed: {msg}")
+    return json.loads(proc.stdout)
+
+
+def list_profiles() -> list[dict]:
+    """All PartyDeck profiles: [{"name": str}, ...]."""
+    return _run_partydeck_json("profile", "list")
+
+
+def list_handlers() -> list[dict]:
+    """All installed handlers: [{"name","author","version","win","steam_appid"}, ...]."""
+    return _run_partydeck_json("handler", "list")
+
+
+def list_devices() -> list[dict]:
+    """Connected input devices: [{"path","name","type"}, ...]. Reference devices
+    by "path" (stable identity), not list position."""
+    return _run_partydeck_json("devices")
+
+
+def _run_partydeck(*args: str) -> None:
+    """Run `partydeck <args>` for a side effect (no JSON output expected)."""
+    binary = _binary_path()
+    if not is_binary_installed():
+        raise RuntimeError(f"PartyDeck binary not installed at {binary}")
+    env = {**os.environ, "HOME": str(_home())}
+    proc = subprocess.run(  # noqa: S603 (fixed binary, no shell)
+        [str(binary), *args],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    if proc.returncode != 0:
+        msg = proc.stderr.strip() or f"exit {proc.returncode}"
+        decky.logger.error("partydeck %s failed: %s", " ".join(args), msg)
+        raise RuntimeError(f"partydeck {' '.join(args)} failed: {msg}")
+
+
+def create_profile(name: str) -> list[dict]:
+    """Create a profile, then return the updated profile list.
+
+    `profile create` prints nothing, so it goes through _run_partydeck (not the
+    JSON variant); we re-query to return the fresh list to the frontend."""
+    _run_partydeck("profile", "create", name)
+    return list_profiles()
 
 
 def _sha256(path: Path) -> str:
