@@ -111,6 +111,17 @@ class Plugin:
             None, partydeck.delete_profile, name
         )
 
+    async def get_config(self) -> dict:
+        return await self.loop.run_in_executor(None, partydeck.get_config)
+
+    async def set_config(self, config: dict) -> dict:
+        return await self.loop.run_in_executor(
+            None, partydeck.set_config, config
+        )
+
+    async def erase_prefixes(self) -> None:
+        return await self.loop.run_in_executor(None, partydeck.erase_prefixes)
+
     # Live input monitor: streams 'partydeck_input' events ({path, button}) from
     # `partydeck monitor-input` until stopped.
 

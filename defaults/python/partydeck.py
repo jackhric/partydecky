@@ -164,6 +164,19 @@ def delete_profile(name: str) -> list[dict]:
     return list_profiles()
 
 
+def get_config() -> dict:
+    return _run_partydeck_json("config", "show")
+
+
+def set_config(config: dict) -> dict:
+    _run_partydeck("config", "set-json", json.dumps(config))
+    return get_config()
+
+
+def erase_prefixes() -> None:
+    _run_partydeck("config", "erase-prefixes")
+
+
 def _sha256(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
