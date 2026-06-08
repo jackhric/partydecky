@@ -1,0 +1,14 @@
+{
+  "deckip": "steamdeck.internal",
+  "deckuser": "deck",
+  "deckport": "22",
+
+  "pluginname": "PartyDeck",
+
+  "deckdir": "/home/deck",
+
+  "deckkey": "",
+
+  "python.analysis.extraPaths": ["defaults"],
+  "python.analysis.typeCheckingMode": "basic"
+}

@@ -1,0 +1,10 @@
+# Python tooling config for the plugin backend.
+# The backend itself has no pip dependencies (decky is injected at runtime);
+# this is only for local testing/linting.
+
+[tool.pytest.ini_options]
+# Tests import the backend as `from python.service import ...`, matching how
+# main.py imports it on-device. Adding defaults/ to sys.path makes `python`
+# resolve as a package during tests.
+pythonpath = ["defaults"]
+testpaths = ["defaults/python/tests"]

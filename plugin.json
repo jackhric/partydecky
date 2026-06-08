@@ -1,0 +1,11 @@
+{
+  "name": "PartyDeck",
+  "author": "jackh",
+  "flags": [],
+  "api_version": 1,
+  "publish": {
+    "tags": ["multiplayer", "split-screen", "local-coop"],
+    "description": "Local multiplayer / split-screen for Steam Deck.",
+    "image": "https://opengraph.githubassets.com/1/SteamDeckHomebrew/PluginLoader"
+  }
+}
