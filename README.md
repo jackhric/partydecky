@@ -1,4 +1,4 @@
-# PartyDeck — Decky Loader Plugin
+# PartyDecky
 
 Local multiplayer / split-screen for the Steam Deck, built as a
 [Decky Loader](https://decky.xyz/) plugin (and runnable on other Decky-supported
