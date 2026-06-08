@@ -1,6 +1,6 @@
-import { Focusable } from "@decky/ui";
+import { DialogButton, Focusable } from "@decky/ui";
 import { FC } from "react";
-import { FaGamepad } from "react-icons/fa";
+import { FaCog, FaGamepad } from "react-icons/fa";
 import { PlayerCell } from "./PlayerCell";
 import type { Player } from "./usePlayerLobby";
 
@@ -8,6 +8,7 @@ interface Props {
   players: Player[];
   profiles: string[];
   onProfileChange: (controllerIndex: number, profile: string) => void;
+  onOpenSettings: () => void;
 }
 
 // Columns: 1 player -> 1 col, otherwise 2 cols (so 3 = 2+1, 4 = 2x2). Beyond 4
@@ -16,7 +17,54 @@ function columnsFor(count: number): number {
   return count <= 1 ? 1 : 2;
 }
 
-export const PlayerGrid: FC<Props> = ({ players, profiles, onProfileChange }) => {
+export const PlayerGrid: FC<Props> = ({
+  players,
+  profiles,
+  onProfileChange,
+  onOpenSettings,
+}) => {
+  // No profiles means nobody can join — point the user at settings to make one.
+  if (profiles.length === 0) {
+    return (
+      <Focusable
+        style={{
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: "1rem",
+          textAlign: "center",
+        }}
+      >
+        <FaGamepad size={48} style={{ opacity: 0.4 }} />
+        <div style={{ fontSize: "1.1rem", fontWeight: 600 }}>
+          No profiles exist!
+        </div>
+        <div style={{ fontSize: "0.9rem", opacity: 0.6 }}>
+          Create them in the PartyDeck settings menu
+        </div>
+        <DialogButton
+          onClick={onOpenSettings}
+          style={{
+            marginTop: "0.5rem",
+            width: "auto",
+            minWidth: 0,
+            height: "48px",
+            flexShrink: 0,
+            padding: "0 2rem",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "0.5rem",
+          }}
+        >
+          <FaCog size={16} /> Settings
+        </DialogButton>
+      </Focusable>
+    );
+  }
+
   if (players.length === 0) {
     return (
       <div
@@ -34,7 +82,7 @@ export const PlayerGrid: FC<Props> = ({ players, profiles, onProfileChange }) =>
         <div style={{ fontSize: "1.1rem", fontWeight: 600 }}>
           Press A on a controller to join
         </div>
-        <div style={{ fontSize: "0.9rem" }}>Press B to leave.</div>
+        <div style={{ fontSize: "0.9rem" }}>Hold B to exit</div>
       </div>
     );
   }

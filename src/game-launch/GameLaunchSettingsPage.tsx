@@ -3,17 +3,19 @@
 // controller that joins gets a player cell with a profile picker; Start launches
 // the assigned instances.
 
-import { DialogButton, Spinner } from "@decky/ui";
+import { Focusable, Navigation, Spinner } from "@decky/ui";
 import { toaster } from "@decky/api";
+import { SETTINGS_ROUTE } from "../settings/SettingsRoute";
 import { FC, useEffect, useMemo, useState } from "react";
-import { FaPlay } from "react-icons/fa";
 import {
   listHandlers,
   listProfiles,
   type Handler,
 } from "../lib/partydeckApi";
 import { PlayerGrid } from "./PlayerGrid";
+import { StartButton } from "./StartButton";
 import { usePlayerLobby } from "./usePlayerLobby";
+import { useHoldToExit } from "./useHoldToExit";
 
 // Reads the :appid out of the URL — routerHook.addRoute renders a bare
 // ComponentType, so there are no react-router params to thread.
@@ -57,6 +59,7 @@ export const GameLaunchSettingsPage: FC = () => {
   );
 
   const { players, setProfile } = usePlayerLobby(profiles ?? []);
+  const { onCancel, onButtonDown, onButtonUp } = useHoldToExit();
 
   const canStart =
     players.length > 0 && players.every((p) => p.profile !== null);
@@ -79,7 +82,13 @@ export const GameLaunchSettingsPage: FC = () => {
   const loading = handlers === null || profiles === null;
 
   return (
-    <div
+    <Focusable
+      // Intercept B/Cancel here so a tap doesn't trigger Steam's instant back;
+      // exiting requires holding B (see useHoldToExit). The per-player tap-B
+      // leave is handled separately by the lobby input listener.
+      onCancel={onCancel}
+      onButtonDown={onButtonDown}
+      onButtonUp={onButtonUp}
       style={{
         // Reserve Steam's top status bar AND bottom button bar (each ~40px) so
         // the page isn't clipped under either. --basicui-header-height is Steam's
@@ -137,25 +146,11 @@ export const GameLaunchSettingsPage: FC = () => {
           )}
         </div>
         {handler ? (
-          <DialogButton
-            disabled={!canStart}
-            onClick={onStart}
-            style={{
-              flexShrink: 0,
-              width: "auto",
-              minWidth: 0,
-              padding: "0 1.25rem",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: "0.5rem",
-            }}
-          >
-            <FaPlay size={14} />
-            {players.length > 0
-              ? `Start ${players.length} player${players.length > 1 ? "s" : ""}`
-              : "Start"}
-          </DialogButton>
+          <StartButton
+            playerCount={players.length}
+            canStart={canStart}
+            onStart={onStart}
+          />
         ) : (
           <span style={{ fontSize: "1.1rem", opacity: 0.7, fontWeight: 600 }}>
             PartyDeck
@@ -208,9 +203,12 @@ export const GameLaunchSettingsPage: FC = () => {
             players={players}
             profiles={profiles}
             onProfileChange={setProfile}
+            onOpenSettings={() =>
+              Navigation.Navigate(`${SETTINGS_ROUTE}/profiles`)
+            }
           />
         </div>
       )}
-    </div>
+    </Focusable>
   );
 };

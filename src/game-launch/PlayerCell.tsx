@@ -5,6 +5,11 @@ import { controllerTypeName } from "../lib/controllerType";
 import { identifyController } from "../lib/steamInput";
 import type { Player } from "./usePlayerLobby";
 
+// Steam's own controller-button glyph, served at the loopback origin (the same
+// place its footer legends pull from). Resolution-independent SVG.
+const B_BUTTON_GLYPH =
+  "https://steamloopback.host/steaminputglyphs/shared_button_b.svg";
+
 interface Props {
   player: Player;
   index: number;
@@ -34,8 +39,33 @@ export const PlayerCell: FC<Props> = ({
         boxSizing: "border-box",
       }}
     >
-      <div style={{ fontSize: "0.85em", opacity: 0.6, fontWeight: 600 }}>
-        PLAYER {index + 1}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}
+      >
+        <span style={{ fontSize: "0.85em", opacity: 0.6, fontWeight: 600 }}>
+          PLAYER {index + 1}
+        </span>
+        <span
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "0.35rem",
+            fontSize: "0.75em",
+            opacity: 0.6,
+            fontWeight: 600,
+          }}
+        >
+          <img
+            src={B_BUTTON_GLYPH}
+            alt="B"
+            style={{ height: "1.25em", width: "1.25em" }}
+          />
+          HOLD TO LEAVE
+        </span>
       </div>
 
       <div
@@ -95,10 +125,6 @@ export const PlayerCell: FC<Props> = ({
           <FaSearch size={14} />
         </DialogButton>
       </Focusable>
-
-      <div style={{ fontSize: "0.75em", opacity: 0.4, textAlign: "center" }}>
-        Press B to leave
-      </div>
     </Focusable>
   );
 };
