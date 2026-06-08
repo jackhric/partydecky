@@ -9,7 +9,7 @@ import {
 import { FC } from "react";
 import { useConfig } from "./useConfig";
 
-export const GeneralSettingsPage: FC = () => {
+export const GeneralPage: FC = () => {
   const { config, busy, error, patch } = useConfig();
 
   if (config === null) {

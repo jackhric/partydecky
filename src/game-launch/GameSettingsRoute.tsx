@@ -1,9 +1,9 @@
 // Registers the full-page PartyDeck per-game launch-settings route at
 // /partydeck/game/:appid. The floating button on the game detail page navigates
-// here (see patches/GameButtonPatch.tsx).
+// here (see game-launch/GameButtonPatch.tsx).
 
 import { routerHook } from "@decky/api";
-import { GameLaunchSettingsPage } from "../components/GameLaunchSettingsPage";
+import { GameLaunchSettingsPage } from "./GameLaunchSettingsPage";
 
 export const GAME_SETTINGS_ROUTE = "/partydeck/game/:appid";
 

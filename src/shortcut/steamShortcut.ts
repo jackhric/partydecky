@@ -16,7 +16,7 @@ const SHORTCUT_NAME = "PartyDeck";
 // RunGame makes Steam navigate to the shortcut's game-details page (the "Play"
 // menu) on launch AND on game exit; Steam also restores that page at boot. The
 // user has no reason to be on our HIDDEN, plugin-managed shortcut's page, so the
-// route patch (patches/ShortcutRedirectPatch.tsx) bounces away from it whenever
+// route patch (shortcut/ShortcutRedirectPatch.tsx) bounces away from it whenever
 // it's shown. We expose the appId so the patch knows which page is "ours", plus
 // a short re-entrancy debounce so NavigateBack's re-render doesn't loop.
 let partyDeckShortcutAppId: number | null = null;

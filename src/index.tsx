@@ -7,16 +7,16 @@ import {
 } from "@decky/ui";
 import { definePlugin } from "@decky/api";
 import { FaUsers, FaCog } from "react-icons/fa";
-import { patchGameButton, unpatchGameButton } from "./patches/GameButtonPatch";
+import { patchGameButton, unpatchGameButton } from "./game-launch/GameButtonPatch";
 import {
   patchShortcutRedirect,
   unpatchShortcutRedirect,
-} from "./patches/ShortcutRedirectPatch";
-import { registerGameSettingsRoute } from "./routes/GameSettingsRoute";
+} from "./shortcut/ShortcutRedirectPatch";
+import { registerGameSettingsRoute } from "./game-launch/GameSettingsRoute";
 import {
   registerSettingsRoute,
   SETTINGS_ROUTE,
-} from "./routes/SettingsRoute";
+} from "./settings/SettingsRoute";
 
 function Content() {
   const openSettings = () => {

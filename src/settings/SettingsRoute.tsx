@@ -2,9 +2,9 @@ import { SidebarNavigation } from "@decky/ui";
 import { routerHook } from "@decky/api";
 import { FC } from "react";
 import { FaCog, FaUser, FaWindows } from "react-icons/fa";
-import { ProfilesPage } from "../components/ProfileSettings";
-import { GeneralSettingsPage } from "../components/GeneralSettings";
-import { ProtonSettingsPage } from "../components/ProtonSettings";
+import { ProfilesPage } from "./ProfilesPage";
+import { GeneralPage } from "./GeneralPage";
+import { ProtonPage } from "./ProtonPage";
 
 export const SETTINGS_ROUTE = "/partydeck/settings";
 
@@ -22,14 +22,14 @@ const SettingsRouter: FC = () => (
       {
         title: "General",
         icon: <FaCog />,
-        content: <GeneralSettingsPage />,
+        content: <GeneralPage />,
         route: `${SETTINGS_ROUTE}/general`,
         visible: true,
       },
       {
         title: "Proton",
         icon: <FaWindows />,
-        content: <ProtonSettingsPage />,
+        content: <ProtonPage />,
         route: `${SETTINGS_ROUTE}/proton`,
         visible: true,
       },

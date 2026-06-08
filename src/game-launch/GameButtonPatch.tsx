@@ -19,7 +19,7 @@ import {
 } from "@decky/ui";
 import { RoutePatch, routerHook } from "@decky/api";
 import { ReactElement } from "react";
-import { PartyDeckLaunchSettingsButtonAnchor } from "../components/PartyDeckLaunchSettingsButton";
+import { PartyDeckLaunchSettingsButtonAnchor } from "./LaunchSettingsButton";
 
 const APP_ROUTE = "/library/app/:appid";
 

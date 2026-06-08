@@ -15,7 +15,7 @@ import { FaTrash } from "react-icons/fa";
 import { erasePrefixes } from "../lib/partydeckApi";
 import { useConfig } from "./useConfig";
 
-export const ProtonSettingsPage: FC = () => {
+export const ProtonPage: FC = () => {
   const { config, busy, error, setError, patch } = useConfig();
 
   // Local buffer so typing doesn't fire a backend write per keystroke; commit
