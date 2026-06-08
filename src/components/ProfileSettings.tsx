@@ -1,10 +1,11 @@
 import {
   ConfirmModal,
+  DialogBody,
   DialogButton,
+  DialogControlsSection,
+  DialogControlsSectionHeader,
   Field,
   Focusable,
-  PanelSection,
-  PanelSectionRow,
   Spinner,
   TextField,
   showModal,
@@ -103,22 +104,34 @@ export const ProfilesPage: FC = () => {
   };
 
   return (
-    <>
-      <PanelSection title="Add profile">
-        <PanelSectionRow>
-          <div
-            style={{
-              fontSize: "0.75em",
-              color: "rgba(255,255,255,0.5)",
-              marginBottom: "0.25rem",
-            }}
+    <DialogBody>
+      {error && (
+        <DialogControlsSection>
+          <Field description={<span style={{ color: "#ff6b6b" }}>{error}</span>} />
+        </DialogControlsSection>
+      )}
+
+      <DialogControlsSection>
+        <DialogControlsSectionHeader>Add Profile</DialogControlsSectionHeader>
+        <Field
+          label="Name"
+          description={
+            nameProblem ? (
+              <span style={{ color: "#ff6b6b" }}>{nameProblem}</span>
+            ) : (
+              "Letters and numbers, used as the in-game account name."
+            )
+          }
+          childrenContainerWidth="max"
+          childrenLayout="below"
+        >
+          <Focusable
+            style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}
           >
-            NAME
-          </div>
-          <Focusable style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-            <div style={{ flex: 1 }}>
+            <div style={{ flexGrow: 1 }}>
               <TextField
                 value={newName}
+                disabled={busy}
                 onChange={(e) => setNewName(e.target.value)}
               />
             </div>
@@ -126,8 +139,9 @@ export const ProfilesPage: FC = () => {
               onClick={onRandom}
               disabled={busy}
               style={{
+                flexShrink: 0,
+                width: "44px",
                 minWidth: 0,
-                width: "40px",
                 height: "40px",
                 padding: 0,
                 display: "flex",
@@ -138,75 +152,53 @@ export const ProfilesPage: FC = () => {
               <FaDice size={18} />
             </DialogButton>
           </Focusable>
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <div
-            style={{
-              fontSize: "0.8em",
-              color: nameProblem ? "#ff6b6b" : "rgba(255,255,255,0.5)",
-              minHeight: "1.2em",
-              marginBottom: "0.5rem",
-            }}
-          >
-            {nameProblem ?? "Letters and numbers, used as the in-game account name."}
-          </div>
-        </PanelSectionRow>
-        <PanelSectionRow>
-          <DialogButton
-            disabled={!canAdd}
-            onClick={onAdd}
-            style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "0.5rem" }}
-          >
-            <FaUserPlus size={16} /> Add profile
-          </DialogButton>
-        </PanelSectionRow>
-      </PanelSection>
+        </Field>
+        <DialogButton
+          disabled={!canAdd}
+          onClick={onAdd}
+          style={{
+            width: "100%",
+            marginTop: "0.5rem",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "0.5rem",
+          }}
+        >
+          <FaUserPlus size={16} /> Add profile
+        </DialogButton>
+      </DialogControlsSection>
 
-      <PanelSection title="Profiles">
-        {error && (
-          <PanelSectionRow>
-            <div style={{ color: "#ff6b6b", fontSize: "0.85em" }}>{error}</div>
-          </PanelSectionRow>
-        )}
+      <DialogControlsSection>
+        <DialogControlsSectionHeader>Profiles</DialogControlsSectionHeader>
         {profiles === null ? (
-          <PanelSectionRow>
-            <Spinner width={24} height={24} />
-          </PanelSectionRow>
+          <Field label={<Spinner width={24} height={24} />} />
         ) : profiles.length === 0 ? (
-          <PanelSectionRow>
-            <div style={{ opacity: 0.6 }}>No profiles yet.</div>
-          </PanelSectionRow>
+          <Field description="No profiles yet." />
         ) : (
           profiles.map((p) => (
-            <PanelSectionRow key={p.name}>
-              <div style={{ marginBottom: "0.5rem" }}>
-                <Field
-                  label={p.name}
-                  icon={<FaUser />}
-                  childrenLayout="inline"
-                  bottomSeparator="standard"
-                >
-                <DialogButton
-                  disabled={busy}
-                  onClick={() => onDelete(p.name)}
-                  style={{
-                    minWidth: 0,
-                    width: "40px",
-                    height: "40px",
-                    padding: 0,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  <FaTrash size={16} />
-                </DialogButton>
-                </Field>
-              </div>
-            </PanelSectionRow>
+            <Field
+              key={p.name}
+              label={p.name}
+              icon={<FaUser />}
+              childrenContainerWidth="fixed"
+            >
+              <DialogButton
+                disabled={busy}
+                onClick={() => onDelete(p.name)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "0.5rem",
+                }}
+              >
+                <FaTrash size={16} /> Delete
+              </DialogButton>
+            </Field>
           ))
         )}
-      </PanelSection>
-    </>
+      </DialogControlsSection>
+    </DialogBody>
   );
 };
