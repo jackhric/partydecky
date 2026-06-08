@@ -33,3 +33,7 @@ Decky loads.
 - Decky Loader: <https://github.com/SteamDeckHomebrew/decky-loader>
 - Dev wiki: <https://wiki.deckbrew.xyz/plugin-dev/getting-started>
 - `@decky/ui` components: <https://www.npmjs.com/package/@decky/ui>
+
+## Credits
+
+See [`docs/CREDITS.md`](docs/CREDITS.md) for acknowledgements and thanks.
