@@ -8,6 +8,9 @@ export interface Player {
   controllerIndex: number;
   controllerName: string;
   controllerType: number;
+  // Steam Input XInput slot — the launch key that ties this player to a
+  // PartyDeck Steam Input pad (see steamInput.ts).
+  xinput: number;
   profile: string | null;
 }
 
@@ -22,6 +25,27 @@ const LEAVE_HOLD_MS = 250;
 // the available pool and can be changed per cell afterward.
 export function usePlayerLobby(profiles: string[]) {
   const [players, setPlayers] = useState<Player[]>([]);
+
+  // Steam's XInput slot assignment collapses after sleep/wake (a known Steam
+  // Deck bug): two controllers report the same nXInputIndex, which would make
+  // both split-screen instances bind the same pad. We can't fix Steam's state,
+  // but we can DETECT it (duplicate/invalid xinput across connected gamepads)
+  // and refuse to let players join until SteamOS is restarted. Polled because
+  // the collapse can happen while the lobby is already open.
+  const [controllerOrderBroken, setControllerOrderBroken] = useState(false);
+  useEffect(() => {
+    const check = () => {
+      const slots = getControllers().map((c) => c.xinput);
+      const broken =
+        slots.some((s) => s < 0) || new Set(slots).size !== slots.length;
+      setControllerOrderBroken(broken);
+    };
+    check();
+    const id = setInterval(check, 1000);
+    return () => clearInterval(id);
+  }, []);
+  const orderBrokenRef = useRef(controllerOrderBroken);
+  orderBrokenRef.current = controllerOrderBroken;
 
   // Latest profiles in a ref so the input callback (registered once) always
   // sees the current pool without re-subscribing on every profile change.
@@ -98,11 +122,20 @@ export function usePlayerLobby(profiles: string[]) {
       if (Date.now() < armedAtRef.current) return;
 
       if (button === BUTTON_A) {
+        if (orderBrokenRef.current) return; // Steam slot collapse -> joins disabled
         if (profilesRef.current.length === 0) return; // no profiles -> can't join
         setPlayers((prev) => {
           if (prev.some((p) => p.controllerIndex === controllerIndex)) return prev;
           const ctrl = getControllers().find((c) => c.index === controllerIndex);
           if (!ctrl) return prev;
+          // The XInput slot is the launch key (it picks the Steam Input pad each
+          // instance binds). Reject a join whose slot is invalid or already
+          // taken — otherwise two pads share a slot and one player's input drives
+          // both instances while the other is dead. This happens after a
+          // controller reconnect, when Steam Input transiently reports a stale
+          // or duplicate nXInputIndex.
+          if (ctrl.xinput < 0) return prev;
+          if (prev.some((p) => p.xinput === ctrl.xinput)) return prev;
           const taken = new Set(prev.map((p) => p.profile));
           const nextProfile =
             profilesRef.current.find((p) => !taken.has(p)) ??
@@ -115,6 +148,7 @@ export function usePlayerLobby(profiles: string[]) {
               controllerIndex,
               controllerName: ctrl.name,
               controllerType: ctrl.type,
+              xinput: ctrl.xinput,
               profile: nextProfile,
             },
           ];
@@ -135,5 +169,12 @@ export function usePlayerLobby(profiles: string[]) {
     );
   }, []);
 
-  return { players, setProfile };
+  // If the slot collapse happens while players are already joined, drop them —
+  // their captured slots are now unreliable, and the warning state replaces the
+  // grid entirely.
+  useEffect(() => {
+    if (controllerOrderBroken) setPlayers([]);
+  }, [controllerOrderBroken]);
+
+  return { players, setProfile, controllerOrderBroken };
 }

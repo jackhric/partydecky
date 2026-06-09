@@ -72,13 +72,16 @@ def _plugin_dir() -> Path:
 def _runtime_dir() -> Path:
     """Where we install the PartyDeck binary bundle on-device.
 
-    DECKY_PLUGIN_RUNTIME_DIR is Decky's per-plugin writable data dir; fall back
-    to ~/.local/share/partydeck-plugin when running outside Decky.
+    DECKY_PLUGIN_RUNTIME_DIR is Decky's per-plugin writable data dir (e.g.
+    ~/homebrew/data/PartyDeck) — the bundle goes straight in it, no subfolder.
+    Note _install_binary() wipes this dir before extracting, so nothing else
+    should be stored here. Fall back to ~/.local/share/partydeck-plugin when
+    running outside Decky.
     """
     base = os.environ.get("DECKY_PLUGIN_RUNTIME_DIR")
     if base:
-        return Path(base) / "partydeck"
-    return _home() / ".local/share/partydeck-plugin/partydeck"
+        return Path(base)
+    return _home() / ".local/share/partydeck-plugin"
 
 
 def _party_data_dir() -> Path:
@@ -304,38 +307,75 @@ def ensure_setup() -> dict:
     }
 
 LAUNCHER_NAME = "partydeck-launch.sh"
+PLAYERS_NAME = "launch-players.json"
 
 
-def write_launcher_script() -> Path:
-    """Write the wrapper script Steam will execute, and return its path."""
+def write_launcher_script(handler: str = "", players: list | None = None) -> Path:
+    """Write the wrapper script Steam will execute, and return its path.
+
+    With a handler + players, the script launches that game headlessly, binding
+    each player to a Steam Input pad by XInput slot. The players payload goes to
+    a sidecar JSON file (passed by path) rather than through Steam launch options
+    — the `--kwin` re-exec re-quotes its forwarded args and would mangle inline
+    JSON. Without a handler, it falls back to the plain GUI (upstream behaviour).
+    """
+    import shlex
+
     runtime = _runtime_dir()
     runtime.mkdir(parents=True, exist_ok=True)
     script = runtime / LAUNCHER_NAME
     binary = _binary_path()
-    # cd into the runtime dir so partydeck finds its sibling bin/ and res/, then
-    # exec the GUI inside a nested KWin session (upstream's GamingModeLauncher.sh).
+
+    if handler and players:
+        players_file = runtime / PLAYERS_NAME
+        players_file.write_text(json.dumps(players))
+        # `--kwin --fullscreen launch ...` runs the headless launch INSIDE the
+        # KWin session (gamescope tiling), per the binary's arg handling.
+        invocation = (
+            f'"{binary}" --kwin --fullscreen launch '
+            f"--handler {shlex.quote(handler)} "
+            f'--players "{players_file}"'
+        )
+    else:
+        # cd into the runtime dir so partydeck finds its sibling bin/ and res/,
+        # then exec the GUI inside a nested KWin session.
+        invocation = f'"{binary}" --kwin --fullscreen'
+
+    # Wrapper-level tracing (wrapper.log) is separate from the binary's own
+    # log.txt: the --kwin re-exec detaches the nested session, so its output can
+    # escape log.txt. The wrapper trace + exit code always survive here, telling
+    # us whether Steam ran the script and how the outer process exited.
+    log = f"{runtime}/log.txt"
+    wrapper = f"{runtime}/wrapper.log"
     script.write_text(
         "#!/bin/bash\n"
+        f'exec > "{wrapper}" 2>&1\n'
+        "set -x\n"
+        f'echo "[wrapper] launcher start: $(date)"\n'
         f'cd "{runtime}" || exit 1\n'
-        f'exec "{binary}" --kwin --fullscreen > "{runtime}/log.txt" 2>&1\n'
+        f'{invocation} > "{log}" 2>&1\n'
+        f'rc=$?\n'
+        f'echo "[wrapper] partydeck exited rc=$rc: $(date)"\n'
+        f"exit $rc\n"
     )
     script.chmod(0o755)
-    decky.logger.info("Wrote launcher script -> %s", script)
+    decky.logger.info("Wrote launcher script (handler=%r) -> %s", handler, script)
     return script
 
 
-def ensure_runtime_files() -> None:
+def ensure_runtime_files(handler: str = "", players: list | None = None) -> None:
     """Cheap, fast prerequisites for a launch (NO binary download): handlers,
     settings, and the launcher script. Safe to call right before launching."""
     install_bundled_handlers()
     write_default_settings()
-    write_launcher_script()
+    write_launcher_script(handler, players)
 
 
-def get_launcher_info() -> dict:
-    """Ensure the cheap runtime files exist, then return the path + working dir
-    the frontend needs to register the Steam shortcut."""
-    ensure_runtime_files()
+def get_launcher_info(handler: str = "", players: list | None = None) -> dict:
+    """Ensure the cheap runtime files exist (rewriting the launcher for this
+    handler/players selection), then return the path + working dir the frontend
+    needs to register the Steam shortcut."""
+    ensure_runtime_files(handler, players)
     return {
         "exe": str(_runtime_dir() / LAUNCHER_NAME),
         "directory": str(_runtime_dir()),

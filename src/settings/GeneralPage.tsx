@@ -1,16 +1,80 @@
 import {
   DialogBody,
+  DialogButton,
   DialogControlsSection,
   DialogControlsSectionHeader,
   Field,
   Spinner,
   ToggleField,
 } from "@decky/ui";
-import { FC } from "react";
+import { toaster } from "@decky/api";
+import { FC, useState } from "react";
 import { useConfig } from "./useConfig";
+import {
+  partydeckStatus,
+  preparePartydeck,
+  setupPartydeck,
+} from "../lib/partydeckApi";
+import {
+  launchViaShortcut,
+  removePartyDeckShortcut,
+} from "../shortcut/steamShortcut";
 
 export const GeneralPage: FC = () => {
   const { config, busy, error, patch } = useConfig();
+  const [launching, setLaunching] = useState(false);
+  const [resetting, setResetting] = useState(false);
+
+  // Delete the PartyDeck Steam shortcut so the next launch recreates it fresh.
+  // Fixes a shortcut left pointing at a stale launcher path (instant-crash on
+  // launch). The next Launch / Start will register a new one with the right exe.
+  const onResetShortcut = async () => {
+    if (resetting) return;
+    setResetting(true);
+    try {
+      const removed = await removePartyDeckShortcut();
+      toaster.toast({
+        title: "PartyDeck",
+        body: removed
+          ? "Shortcut removed — it'll be recreated on next launch."
+          : "No PartyDeck shortcut found.",
+      });
+    } catch (e) {
+      console.error("[partydeck] reset shortcut failed", e);
+      toaster.toast({ title: "PartyDeck", body: `Reset failed: ${e}` });
+    } finally {
+      setResetting(false);
+    }
+  };
+
+  // Launch PartyDeck's own GUI via the Steam shortcut (empty handler/players =>
+  // the launcher script's GUI fallback). Used to validate the KWin/gamescope
+  // launch chain independently of the per-game headless flow.
+  const onLaunchGui = async () => {
+    if (launching) return;
+    setLaunching(true);
+    try {
+      const status = await partydeckStatus();
+      if (!status.binary_installed) {
+        if (!status.setup_running) await setupPartydeck();
+        toaster.toast({
+          title: "PartyDeck",
+          body: "Installing PartyDeck — try again in a moment.",
+        });
+        return;
+      }
+      const { exe, directory } = await preparePartydeck(0, "", []);
+      const appId = await launchViaShortcut(exe, directory);
+      if (appId === null) {
+        toaster.toast({ title: "PartyDeck", body: "Failed to launch GUI." });
+      }
+    } catch (e) {
+      console.error("[partydeck] GUI launch failed", e);
+      toaster.toast({ title: "PartyDeck", body: `Launch failed: ${e}` });
+    } finally {
+      setLaunching(false);
+    }
+  };
 
   if (config === null) {
     return (
@@ -38,6 +102,26 @@ export const GeneralPage: FC = () => {
           disabled={busy}
           onChange={(v) => patch("profile_unique_dirs", v)}
         />
+      </DialogControlsSection>
+
+      <DialogControlsSection>
+        <DialogControlsSectionHeader>Debug</DialogControlsSectionHeader>
+        <Field
+          label="Launch PartyDeck GUI"
+          description="Launch PartyDeck's own GUI via its Steam shortcut (no preselected game). For testing the launch chain."
+        >
+          <DialogButton disabled={launching} onClick={onLaunchGui}>
+            {launching ? "Launching…" : "Launch"}
+          </DialogButton>
+        </Field>
+        <Field
+          label="Reset PartyDeck Shortcut"
+          description="Delete and recreate the hidden PartyDeck Steam shortcut. Fixes an instant crash on launch caused by a shortcut pointing at a stale path."
+        >
+          <DialogButton disabled={resetting} onClick={onResetShortcut}>
+            {resetting ? "Resetting…" : "Reset"}
+          </DialogButton>
+        </Field>
       </DialogControlsSection>
     </DialogBody>
   );

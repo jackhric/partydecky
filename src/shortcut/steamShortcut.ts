@@ -155,14 +155,21 @@ export async function launchViaShortcut(
     // creation — once hidden it stays hidden across reuses.
     await hideShortcut(appId);
   } else {
-    // Reusing an existing shortcut: keep launch options current, and ensure it's
-    // hidden (covers shortcuts created before we added hiding). Idempotent.
-    if (launchOptions) {
-      try {
-        SteamClient.Apps.SetAppLaunchOptions(appId, launchOptions);
-      } catch {
-        /* non-fatal */
-      }
+    // Reusing an existing shortcut: REFRESH the exe + start dir to the current
+    // launcher path. A shortcut created in an older session can point at a stale
+    // path (e.g. before the runtime dir was flattened); without this it would
+    // RunGame a dead exe and "launch" into an instant crash. Then keep launch
+    // options current and ensure it's hidden. All idempotent.
+    try {
+      SteamClient.Apps.SetShortcutExe(appId, exe);
+      SteamClient.Apps.SetShortcutStartDir(appId, directory);
+    } catch {
+      /* non-fatal */
+    }
+    try {
+      SteamClient.Apps.SetAppLaunchOptions(appId, launchOptions);
+    } catch {
+      /* non-fatal */
     }
     await hideShortcut(appId);
   }
@@ -180,4 +187,26 @@ export async function launchViaShortcut(
   // 100 = ELaunchSource._2ftLibraryDetails (see @decky/ui App.d.ts ELaunchSource).
   SteamClient.Apps.RunGame(gameId, "", -1, 100);
   return appId;
+}
+
+/**
+ * Delete the persistent PartyDeck shortcut (if any) and clear cached state, so
+ * the next launch recreates it fresh with the current exe/dir. A repair hatch
+ * for when a shortcut is left pointing at a stale launcher path. Returns true if
+ * a shortcut was found and removed.
+ */
+export async function removePartyDeckShortcut(): Promise<boolean> {
+  const appId = findExistingShortcut();
+  if (appId === null) {
+    return false;
+  }
+  try {
+    SteamClient.Apps.RemoveShortcut(appId);
+  } catch {
+    return false;
+  }
+  partyDeckShortcutAppId = null;
+  // Give Steam a moment to drop it from appStore before any recreate.
+  await sleep(250);
+  return true;
 }

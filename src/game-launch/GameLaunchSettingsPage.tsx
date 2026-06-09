@@ -10,8 +10,14 @@ import { FC, useEffect, useMemo, useState } from "react";
 import {
   listHandlers,
   listProfiles,
+  partydeckStatus,
+  preparePartydeck,
+  setupPartydeck,
   type Handler,
 } from "../lib/partydeckApi";
+import { launchViaShortcut } from "../shortcut/steamShortcut";
+import { getControllers } from "../lib/steamInput";
+import { FaExclamationTriangle } from "react-icons/fa";
 import { PlayerGrid } from "./PlayerGrid";
 import { StartButton } from "./StartButton";
 import { usePlayerLobby } from "./usePlayerLobby";
@@ -58,25 +64,70 @@ export const GameLaunchSettingsPage: FC = () => {
     [handlers, appId],
   );
 
-  const { players, setProfile } = usePlayerLobby(profiles ?? []);
+  const { players, setProfile, controllerOrderBroken } = usePlayerLobby(
+    profiles ?? [],
+  );
   const { onCancel, onButtonDown, onButtonUp } = useHoldToExit();
 
   const canStart =
-    players.length > 0 && players.every((p) => p.profile !== null);
+    !controllerOrderBroken &&
+    players.length > 0 &&
+    players.every((p) => p.profile !== null);
 
-  const onStart = () => {
-    if (!canStart) return;
-    // Backend `launch --players` is not wired yet; surface the assignment so the
-    // flow is testable end-to-end on-device until it lands.
-    const payload = players.map((p) => ({
-      controllerIndex: p.controllerIndex,
-      profile: p.profile,
-    }));
-    console.log("[partydeck] launch payload", { appId, players: payload });
-    toaster.toast({
-      title: "PartyDeck",
-      body: `Launch not wired yet — ${players.length} player(s) ready.`,
-    });
+  const onStart = async () => {
+    if (!canStart || handler === null) return;
+
+    try {
+      const status = await partydeckStatus();
+      if (!status.binary_installed) {
+        // First run: kick off setup and tell the user to retry once it's done.
+        if (!status.setup_running) await setupPartydeck();
+        toaster.toast({
+          title: "PartyDeck",
+          body: "Installing PartyDeck — try Start again in a moment.",
+        });
+        return;
+      }
+
+      // Re-resolve each player's XInput slot FRESH at launch from the stable
+      // controllerIndex — a reconnect between join and Start can change the slot,
+      // and the join-time value would be stale. Array order = split order.
+      const live = getControllers();
+      const payload = players.map((p) => {
+        const cur = live.find((c) => c.index === p.controllerIndex);
+        return {
+          profile: p.profile as string,
+          xinput: cur ? cur.xinput : p.xinput,
+        };
+      });
+
+      // Guard: every slot must be valid and unique, or two instances bind the
+      // same pad (one player drives both, the other is dead). Abort loudly
+      // rather than launch a broken session.
+      const slots = payload.map((p) => p.xinput);
+      if (slots.some((s) => s < 0) || new Set(slots).size !== slots.length) {
+        toaster.toast({
+          title: "PartyDeck",
+          body: "Controller assignment is stale — re-join the controllers and try again.",
+        });
+        return;
+      }
+
+      const { exe, directory } = await preparePartydeck(
+        appId,
+        handler.name,
+        payload,
+      );
+      // launchOptions stays empty — the game + players live in the sidecar file
+      // the launcher script references. ShortcutRedirectPatch handles the UI.
+      const shortcutAppId = await launchViaShortcut(exe, directory);
+      if (shortcutAppId === null) {
+        toaster.toast({ title: "PartyDeck", body: "Failed to launch." });
+      }
+    } catch (e) {
+      console.error("[partydeck] launch failed", e);
+      toaster.toast({ title: "PartyDeck", body: `Launch failed: ${e}` });
+    }
   };
 
   const loading = handlers === null || profiles === null;
@@ -187,6 +238,28 @@ export const GameLaunchSettingsPage: FC = () => {
           </div>
           <div style={{ fontSize: "0.9rem" }}>
             PartyDeck doesn't have split-screen support set up for {title}.
+          </div>
+        </div>
+      ) : controllerOrderBroken ? (
+        <div
+          style={{
+            flex: 1,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "0.75rem",
+            textAlign: "center",
+          }}
+        >
+          <FaExclamationTriangle size={48} color="#f0c000" />
+          <div style={{ fontSize: "1.2rem", fontWeight: 600 }}>
+            Sleep mode detected
+          </div>
+          <div style={{ fontSize: "0.95rem", maxWidth: "32rem" }}>
+            Restart SteamOS to allow splitscreen play. Waking from sleep scrambles
+            Steam's controller assignment, so players can't be matched to screens
+            until you restart.
           </div>
         </div>
       ) : (

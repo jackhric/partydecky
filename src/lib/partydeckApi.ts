@@ -19,14 +19,30 @@ export interface Device {
   path: string; // stable identity; scan order isn't hotplug-stable
   name: string;
   type: "gamepad" | "keyboard" | "mouse" | "other";
+  // XInput slot for Steam Input virtual pads (== Steam Input nXInputIndex);
+  // absent for physical devices.
+  xinput_slot?: number;
+}
+
+// One player in a headless launch — array order is split order (player 1 = top).
+export interface LaunchPlayer {
+  profile: string;
+  xinput: number; // Steam Input XInput slot (ties to Device.xinput_slot)
+}
+
+export interface LauncherInfo {
+  exe: string;
+  directory: string;
+  log: string;
+}
+
+export interface PartydeckStatus {
+  binary_installed: boolean;
+  setup_running: boolean;
+  setup_error: string | null;
 }
 
 export type DeviceFilter = "all" | "no-steam-input" | "only-steam-input";
-
-export interface InputEvent {
-  path: string;
-  button: string;
-}
 
 // Mirrors PartyConfig in partydeck/src/app/config.rs — field names are the serde
 // wire names; set_config round-trips the whole object, so keep all fields.
@@ -65,11 +81,15 @@ export const setConfig = callable<[config: PartyConfig], PartyConfig>(
 );
 export const erasePrefixes = callable<[], void>("erase_prefixes");
 
-export const startInputMonitor = callable<
-  [filter: DeviceFilter],
-  { started: boolean; reason?: string }
->("start_input_monitor");
-export const stopInputMonitor = callable<
+// Launch lifecycle. setup downloads/installs the binary (poll status); prepare
+// writes the launcher script for a given game + player assignment and returns
+// its path so the frontend can register + RunGame a Steam shortcut.
+export const partydeckStatus = callable<[], PartydeckStatus>("partydeck_status");
+export const setupPartydeck = callable<
   [],
-  { stopped: boolean; reason?: string }
->("stop_input_monitor");
+  { started: boolean; reason?: string }
+>("setup_partydeck");
+export const preparePartydeck = callable<
+  [appid: number, handler: string, players: LaunchPlayer[]],
+  LauncherInfo
+>("prepare_partydeck");

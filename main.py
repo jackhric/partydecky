@@ -1,5 +1,4 @@
 import asyncio
-import json
 import os
 import sys
 from pathlib import Path
@@ -75,19 +74,27 @@ class Plugin:
         self._setup_task = self.loop.create_task(_run())
         return {"started": True}
 
-    async def prepare_partydeck(self, appid: int = 0) -> dict:
-        """Return the launcher script path + working dir so the FRONTEND can
-        register a non-Steam shortcut and RunGame it (so Steam provides the
-        display session, not us). Requires setup to have completed; raises if the
-        binary isn't installed yet.
+    async def prepare_partydeck(
+        self, appid: int = 0, handler: str = "", players: list = None
+    ) -> dict:
+        """Write the launcher script for this game + player assignment and return
+        its path + working dir, so the FRONTEND can register a non-Steam shortcut
+        and RunGame it (so Steam provides the display session, not us). Requires
+        setup to have completed; raises if the binary isn't installed yet.
 
-        `appid` is accepted now so the contract is stable; it's unused until the
-        headless step (4b) pre-selects the game via launch options."""
-        decky.logger.info(f"prepare_partydeck called (appid={appid})")
+        `handler` is the handler name to launch headlessly; `players` is a list of
+        {profile, xinput} dicts (array order = split order). With neither, the
+        launcher falls back to the plain GUI."""
+        decky.logger.info(
+            f"prepare_partydeck called (appid={appid}, handler={handler!r}, "
+            f"players={players})"
+        )
         if not partydeck.is_binary_installed():
             raise RuntimeError("PartyDeck not installed yet — run setup first")
         # Cheap: ensures handlers/settings/launcher exist, returns paths.
-        return await self.loop.run_in_executor(None, partydeck.get_launcher_info)
+        return await self.loop.run_in_executor(
+            None, partydeck.get_launcher_info, handler, players
+        )
 
     # Run in the executor so the subprocess doesn't block the event loop.
     async def list_profiles(self) -> list:
@@ -122,66 +129,6 @@ class Plugin:
     async def erase_prefixes(self) -> None:
         return await self.loop.run_in_executor(None, partydeck.erase_prefixes)
 
-    # Live input monitor: streams 'partydeck_input' events ({path, button}) from
-    # `partydeck monitor-input` until stopped.
-
-    async def start_input_monitor(self, filter: str = "only-steam-input") -> dict:
-        existing = getattr(self, "_input_proc", None)
-        if existing is not None and existing.returncode is None:
-            return {"started": False, "reason": "already running"}
-
-        binary = partydeck._binary_path()
-        if not partydeck.is_binary_installed():
-            raise RuntimeError(f"PartyDeck binary not installed at {binary}")
-
-        import os as _os
-
-        self._input_proc = await asyncio.create_subprocess_exec(
-            str(binary), "monitor-input", "--filter", filter,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env={**_os.environ, "HOME": str(partydeck._home())},
-        )
-        decky.logger.info("input monitor started (filter=%s)", filter)
-        self._input_reader = self.loop.create_task(self._read_input_stream())
-        return {"started": True}
-
-    async def _read_input_stream(self) -> None:
-        proc = self._input_proc
-        assert proc is not None and proc.stdout is not None
-        try:
-            while True:
-                line = await proc.stdout.readline()
-                if not line:  # EOF
-                    break
-                try:
-                    evt = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                await decky.emit("partydeck_input", evt)
-        except asyncio.CancelledError:
-            pass
-        finally:
-            decky.logger.info("input monitor stream ended")
-
-    async def stop_input_monitor(self) -> dict:
-        proc = getattr(self, "_input_proc", None)
-        reader = getattr(self, "_input_reader", None)
-        if reader is not None:
-            reader.cancel()
-            self._input_reader = None
-        if proc is None or proc.returncode is not None:
-            self._input_proc = None
-            return {"stopped": False, "reason": "not running"}
-        proc.terminate()
-        try:
-            await asyncio.wait_for(proc.wait(), timeout=2)
-        except asyncio.TimeoutError:
-            proc.kill()
-        self._input_proc = None
-        decky.logger.info("input monitor stopped")
-        return {"stopped": True}
-
     # Runs once when the plugin is loaded. Long-running async setup goes here.
     async def _main(self) -> None:
         self.loop = asyncio.get_event_loop()
@@ -190,7 +137,6 @@ class Plugin:
     # Called first during unload. Stop tasks / release resources here.
     async def _unload(self) -> None:
         decky.logger.info("PartyDeck backend unloading.")
-        await self.stop_input_monitor()
 
     # Called during uninstall, after _unload. Clean up persisted state here.
     async def _uninstall(self) -> None:

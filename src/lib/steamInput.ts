@@ -8,6 +8,10 @@ export interface SteamController {
   name: string;
   type: number;
   vendorId: number;
+  // XInput slot. Maps to the Steam Input virtual pad PartyDeck binds at launch
+  // ("Microsoft X-Box 360 pad N" / devices `xinput_slot`), so launch can route
+  // each lobby player to the right pad. -1 if Steam didn't assign one.
+  xinput: number;
 }
 
 // Subset of the ControllerInputGamepadButton enum (full range 0..50).
@@ -43,6 +47,7 @@ export function getControllers(): SteamController[] {
       name: c.strName ?? `Controller ${c.nControllerIndex}`,
       type: c.eControllerType ?? 0,
       vendorId: c.unVendorID ?? 0,
+      xinput: c.nXInputIndex ?? -1,
     }));
   } catch {
     return [];
