@@ -102,6 +102,13 @@ export const GeneralPage: FC = () => {
           disabled={busy}
           onChange={(v) => patch("profile_unique_dirs", v)}
         />
+        <ToggleField
+          label="Vertical splitscreen"
+          description="Split the screen side-by-side instead of top/bottom when playing with two players. Has no effect with three or more players (always a quarter grid)."
+          checked={config.vertical_two_player}
+          disabled={busy}
+          onChange={(v) => patch("vertical_two_player", v)}
+        />
       </DialogControlsSection>
 
       <DialogControlsSection>
