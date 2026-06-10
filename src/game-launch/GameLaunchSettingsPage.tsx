@@ -16,6 +16,7 @@ import {
   type Handler,
 } from "../lib/partydeckApi";
 import { launchViaShortcut } from "../shortcut/steamShortcut";
+import { playLaunchGameSound } from "../lib/navSound";
 import { getControllers } from "../lib/steamInput";
 import { FaExclamationTriangle } from "react-icons/fa";
 import { PlayerGrid } from "./PlayerGrid";
@@ -64,10 +65,9 @@ export const GameLaunchSettingsPage: FC = () => {
     [handlers, appId],
   );
 
-  const { players, setProfile, controllerOrderBroken } = usePlayerLobby(
-    profiles ?? [],
-  );
-  const { onCancel, onButtonDown, onButtonUp } = useHoldToExit();
+  const { players, setProfile, controllerOrderBroken, leavingControllers } =
+    usePlayerLobby(profiles ?? []);
+  const { onCancel, onButtonDown, onButtonUp, remainingMs } = useHoldToExit();
 
   const canStart =
     !controllerOrderBroken &&
@@ -112,6 +112,9 @@ export const GameLaunchSettingsPage: FC = () => {
         });
         return;
       }
+
+      // All guards passed — the launch is committed from here.
+      playLaunchGameSound();
 
       const { exe, directory } = await preparePartydeck(
         appId,
@@ -197,11 +200,7 @@ export const GameLaunchSettingsPage: FC = () => {
           )}
         </div>
         {handler ? (
-          <StartButton
-            playerCount={players.length}
-            canStart={canStart}
-            onStart={onStart}
-          />
+          <StartButton canStart={canStart} onStart={onStart} />
         ) : (
           <span style={{ fontSize: "1.1rem", opacity: 0.7, fontWeight: 600 }}>
             PartyDeck
@@ -275,6 +274,8 @@ export const GameLaunchSettingsPage: FC = () => {
           <PlayerGrid
             players={players}
             profiles={profiles}
+            exitRemainingMs={remainingMs}
+            leavingControllers={leavingControllers}
             onProfileChange={setProfile}
             onOpenSettings={() =>
               Navigation.Navigate(`${SETTINGS_ROUTE}/profiles`)

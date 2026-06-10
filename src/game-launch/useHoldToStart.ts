@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 const COUNTDOWN_FROM = 3;
 const TICK_MS = 1000;
+// Full hold duration — exported so StartButton's fill indicator sweeps over
+// exactly the time the hold takes.
+export const HOLD_TOTAL_MS = COUNTDOWN_FROM * TICK_MS;
 
 // Hold-to-start: launching requires holding the Start button through a 3..2..1
 // countdown so a stray A-press (e.g. from a controller joining the lobby) can't

@@ -1,7 +1,9 @@
 import { Navigation } from "@decky/ui";
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { playExitMenuSound } from "../lib/navSound";
 
 const HOLD_MS = 2000;
+const TICK_MS = 100;
 // GamepadButton.CANCEL from @decky/ui's FooterLegend enum (the B / back button).
 // Inlined to avoid a deep-import of the enum from @decky/ui/dist internals.
 const GAMEPAD_CANCEL = 2;
@@ -14,14 +16,21 @@ type GamepadEvent = CustomEvent<{ button: number; is_repeat?: boolean }>;
 // deliberate HOLD. We intercept Cancel via Focusable's onCancel (consuming the
 // tap so Steam doesn't navigate) and time the hold via onButtonDown/Up.
 export function useHoldToExit() {
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const deadlineRef = useRef(0);
+  // Milliseconds left in the hold, or null when B isn't held. Drives the
+  // "Exiting in X.X..." countdown in the lobby.
+  const [remainingMs, setRemainingMs] = useState<number | null>(null);
 
   const clear = useCallback(() => {
-    if (timerRef.current !== null) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
+    if (intervalRef.current !== null) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
     }
+    setRemainingMs(null);
   }, []);
+
+  useEffect(() => clear, [clear]);
 
   // Consume the Cancel press so Steam's default back-navigation never fires.
   const onCancel = useCallback((e: CustomEvent) => {
@@ -32,13 +41,21 @@ export function useHoldToExit() {
     (e: GamepadEvent) => {
       if (e.detail.button !== GAMEPAD_CANCEL) return;
       if (e.detail.is_repeat) return;
-      if (timerRef.current !== null) return;
-      timerRef.current = setTimeout(() => {
-        timerRef.current = null;
-        Navigation.NavigateBack();
-      }, HOLD_MS);
+      if (intervalRef.current !== null) return;
+      deadlineRef.current = Date.now() + HOLD_MS;
+      setRemainingMs(HOLD_MS);
+      intervalRef.current = setInterval(() => {
+        const left = deadlineRef.current - Date.now();
+        if (left <= 0) {
+          clear();
+          playExitMenuSound();
+          Navigation.NavigateBack();
+        } else {
+          setRemainingMs(left);
+        }
+      }, TICK_MS);
     },
-    [],
+    [clear],
   );
 
   const onButtonUp = useCallback(
@@ -49,5 +66,5 @@ export function useHoldToExit() {
     [clear],
   );
 
-  return { onCancel, onButtonDown, onButtonUp };
+  return { onCancel, onButtonDown, onButtonUp, remainingMs };
 }

@@ -3,7 +3,12 @@
 // nothing external — no Steam internals, no asset serving, no backend. Each call
 // is guarded so a playback hiccup never throws into the caller.
 
-import { joinSoundUri, leaveSoundUri } from "./soundData";
+import {
+  exitMenuSoundUri,
+  joinSoundUri,
+  launchGameSoundUri,
+  leaveSoundUri,
+} from "./soundData";
 
 function makePlayer(uri: string): () => void {
   const audio = new Audio(uri);
@@ -19,3 +24,5 @@ function makePlayer(uri: string): () => void {
 
 export const playJoinSound = makePlayer(joinSoundUri);
 export const playLeaveSound = makePlayer(leaveSoundUri);
+export const playExitMenuSound = makePlayer(exitMenuSoundUri);
+export const playLaunchGameSound = makePlayer(launchGameSoundUri);

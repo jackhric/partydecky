@@ -12,12 +12,19 @@ export interface Player {
   // PartyDeck Steam Input pad (see steamInput.ts).
   xinput: number;
   profile: string | null;
+  // Bumped on every LB/RB press; PlayerCell turns each change into a spring
+  // impulse on the glyph, kicked toward shakeDir (-1 = left/LB, 1 = right/RB).
+  shakeTick: number;
+  shakeDir: -1 | 1;
 }
 
 const BUTTON_A = 0;
 const BUTTON_B = 1;
+const BUTTON_L1 = 30;
+const BUTTON_R1 = 31;
 const ARMING_DELAY_MS = 500;
-const LEAVE_HOLD_MS = 250;
+// Exported so PlayerCell's hold indicator animates over the same duration.
+export const LEAVE_HOLD_MS = 250;
 
 // Lobby state machine: press A on an unjoined controller to add a player cell,
 // HOLD B on a joined controller (~0.5s) to remove it — a tap won't leave, so an
@@ -65,19 +72,37 @@ export function usePlayerLobby(profiles: string[]) {
   const armedAtRef = useRef(0);
   // Per-controller B-hold timers: a held B must survive ~0.5s to leave.
   const leaveTimersRef = useRef(new Map<number, ReturnType<typeof setTimeout>>());
+  // Mirrors the timer map as state so each card can show its hold indicator.
+  const [leavingControllers, setLeavingControllers] = useState<Set<number>>(
+    new Set(),
+  );
 
-  const cancelLeave = useCallback((controllerIndex: number) => {
-    const timers = leaveTimersRef.current;
-    const t = timers.get(controllerIndex);
-    if (t !== undefined) {
-      clearTimeout(t);
-      timers.delete(controllerIndex);
-    }
+  const clearLeaving = useCallback((controllerIndex: number) => {
+    setLeavingControllers((prev) => {
+      if (!prev.has(controllerIndex)) return prev;
+      const next = new Set(prev);
+      next.delete(controllerIndex);
+      return next;
+    });
   }, []);
+
+  const cancelLeave = useCallback(
+    (controllerIndex: number) => {
+      const timers = leaveTimersRef.current;
+      const t = timers.get(controllerIndex);
+      if (t !== undefined) {
+        clearTimeout(t);
+        timers.delete(controllerIndex);
+      }
+      clearLeaving(controllerIndex);
+    },
+    [clearLeaving],
+  );
 
   const cancelAllLeaves = useCallback(() => {
     leaveTimersRef.current.forEach((t) => clearTimeout(t));
     leaveTimersRef.current.clear();
+    setLeavingControllers((prev) => (prev.size > 0 ? new Set() : prev));
   }, []);
 
   useEffect(() => {
@@ -103,6 +128,7 @@ export function usePlayerLobby(profiles: string[]) {
           if (leaveTimersRef.current.has(controllerIndex)) return;
           const timer = setTimeout(() => {
             leaveTimersRef.current.delete(controllerIndex);
+            clearLeaving(controllerIndex);
             setPlayers((prev) => {
               const next = prev.filter(
                 (p) => p.controllerIndex !== controllerIndex,
@@ -112,6 +138,7 @@ export function usePlayerLobby(profiles: string[]) {
             });
           }, LEAVE_HOLD_MS);
           leaveTimersRef.current.set(controllerIndex, timer);
+          setLeavingControllers((prev) => new Set(prev).add(controllerIndex));
         } else {
           cancelLeave(controllerIndex); // released before the hold completed
         }
@@ -119,6 +146,22 @@ export function usePlayerLobby(profiles: string[]) {
       }
 
       if (!isDown) return;
+
+      // Cosmetic: a joined player's LB/RB knocks their card's glyph left/right.
+      // No arming gate — it can't change lobby state, and an unjoined
+      // controller is a natural no-op (no matching player).
+      if (button === BUTTON_L1 || button === BUTTON_R1) {
+        const dir = button === BUTTON_L1 ? -1 : 1;
+        setPlayers((prev) =>
+          prev.map((p) =>
+            p.controllerIndex === controllerIndex
+              ? { ...p, shakeTick: p.shakeTick + 1, shakeDir: dir as -1 | 1 }
+              : p,
+          ),
+        );
+        return;
+      }
+
       if (Date.now() < armedAtRef.current) return;
 
       if (button === BUTTON_A) {
@@ -150,6 +193,8 @@ export function usePlayerLobby(profiles: string[]) {
               controllerType: ctrl.type,
               xinput: ctrl.xinput,
               profile: nextProfile,
+              shakeTick: 0,
+              shakeDir: 1,
             },
           ];
         });
@@ -176,5 +221,5 @@ export function usePlayerLobby(profiles: string[]) {
     if (controllerOrderBroken) setPlayers([]);
   }, [controllerOrderBroken]);
 
-  return { players, setProfile, controllerOrderBroken };
+  return { players, setProfile, controllerOrderBroken, leavingControllers };
 }

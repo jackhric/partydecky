@@ -7,6 +7,10 @@ import type { Player } from "./usePlayerLobby";
 interface Props {
   players: Player[];
   profiles: string[];
+  /** Ms left in the hold-B-to-exit countdown, or null when B isn't held. */
+  exitRemainingMs: number | null;
+  /** Controllers currently mid B-hold to leave (drives the cell indicator). */
+  leavingControllers: Set<number>;
   onProfileChange: (controllerIndex: number, profile: string) => void;
   onOpenSettings: () => void;
 }
@@ -20,6 +24,8 @@ function columnsFor(count: number): number {
 export const PlayerGrid: FC<Props> = ({
   players,
   profiles,
+  exitRemainingMs,
+  leavingControllers,
   onProfileChange,
   onOpenSettings,
 }) => {
@@ -82,7 +88,11 @@ export const PlayerGrid: FC<Props> = ({
         <div style={{ fontSize: "1.1rem", fontWeight: 600 }}>
           Press A on a controller to join
         </div>
-        <div style={{ fontSize: "0.9rem" }}>Hold B to exit</div>
+        <div style={{ fontSize: "0.9rem" }}>
+          {exitRemainingMs !== null
+            ? `Exiting in ${(exitRemainingMs / 1000).toFixed(1)}...`
+            : "Hold B to exit"}
+        </div>
       </div>
     );
   }
@@ -109,6 +119,8 @@ export const PlayerGrid: FC<Props> = ({
           player={p}
           index={i}
           profiles={profiles}
+          leaving={leavingControllers.has(p.controllerIndex)}
+          compact={players.length >= 3}
           onProfileChange={(profile) => onProfileChange(p.controllerIndex, profile)}
         />
       ))}
