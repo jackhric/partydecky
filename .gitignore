@@ -34,3 +34,6 @@ scripts/
 *~
 .DS_Store
 Thumbs.db
+
+# Local-only Claude notes (kept out of the repo by choice)
+CLAUDE.md
