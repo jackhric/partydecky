@@ -1,7 +1,7 @@
 import { useQuickAccessVisible } from "@decky/ui";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getControllers, registerInput } from "../lib/steamInput";
-import { playJoinSound, playLeaveSound } from "../lib/navSound";
+import { getControllers, registerInput } from "./steamInput";
+import { playJoinSound, playLeaveSound } from "./navSound";
 import { useSteamMenuVisible } from "./useSteamMenuVisible";
 
 export interface Player {

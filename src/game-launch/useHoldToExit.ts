@@ -1,6 +1,6 @@
 import { Navigation } from "@decky/ui";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { playExitMenuSound } from "../lib/navSound";
+import { playExitMenuSound } from "./navSound";
 
 const HOLD_MS = 2000;
 const TICK_MS = 100;

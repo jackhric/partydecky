@@ -93,3 +93,18 @@ export const preparePartydeck = callable<
   [appid: number, handler: string, players: LaunchPlayer[]],
   LauncherInfo
 >("prepare_partydeck");
+
+// Library artwork for the PartyDeck shortcut: base64 PNGs for
+// SetCustomArtworkForApp, plus an on-device path for SetShortcutIcon. Any
+// piece may be absent if its file is missing from the deploy.
+export interface ShortcutArtwork {
+  capsule?: string;
+  hero?: string;
+  logo?: string;
+  header?: string;
+  icon_path: string | null;
+}
+
+export const getShortcutArtwork = callable<[], ShortcutArtwork>(
+  "get_shortcut_artwork",
+);

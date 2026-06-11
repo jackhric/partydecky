@@ -5,8 +5,7 @@ import { FaCog, FaUser, FaWindows } from "react-icons/fa";
 import { ProfilesPage } from "./ProfilesPage";
 import { GeneralPage } from "./GeneralPage";
 import { ProtonPage } from "./ProtonPage";
-
-export const SETTINGS_ROUTE = "/partydeck/settings";
+import { SETTINGS_ROUTE } from "../lib/routes";
 
 const SettingsRouter: FC = () => (
   <SidebarNavigation

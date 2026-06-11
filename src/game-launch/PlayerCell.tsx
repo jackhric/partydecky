@@ -7,8 +7,8 @@ import {
 } from "@decky/ui";
 import { FC, useCallback, useEffect, useRef, useState } from "react";
 import { FaGamepad, FaSearch, FaUser } from "react-icons/fa";
-import { controllerTypeName } from "../lib/controllerType";
-import { identifyController } from "../lib/steamInput";
+import { controllerTypeName } from "./controllerType";
+import { identifyController } from "./steamInput";
 import { LEAVE_HOLD_MS, type Player } from "./usePlayerLobby";
 
 // Steam's own controller-button glyph, served at the loopback origin (the same

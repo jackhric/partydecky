@@ -17,7 +17,7 @@ import { RoutePatch, routerHook } from "@decky/api";
 import {
   getPartyDeckShortcutAppId,
   shouldRedirectAwayFrom,
-} from "./steamShortcut";
+} from "../lib/steamShortcut";
 
 const APP_ROUTE = "/library/app/:appid";
 

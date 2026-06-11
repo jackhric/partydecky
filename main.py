@@ -96,6 +96,11 @@ class Plugin:
             None, partydeck.get_launcher_info, handler, players
         )
 
+    async def get_shortcut_artwork(self) -> dict:
+        return await self.loop.run_in_executor(
+            None, partydeck.get_shortcut_artwork
+        )
+
     # Run in the executor so the subprocess doesn't block the event loop.
     async def list_profiles(self) -> list:
         return await self.loop.run_in_executor(None, partydeck.list_profiles)

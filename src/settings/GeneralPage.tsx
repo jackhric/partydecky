@@ -18,7 +18,7 @@ import {
 import {
   launchViaShortcut,
   removePartyDeckShortcut,
-} from "../shortcut/steamShortcut";
+} from "../lib/steamShortcut";
 
 export const GeneralPage: FC = () => {
   const { config, busy, error, patch } = useConfig();

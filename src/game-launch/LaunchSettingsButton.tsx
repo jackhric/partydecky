@@ -24,7 +24,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { FaUsers } from "react-icons/fa";
+import { PartyDeckIcon } from "../lib/PartyDeckIcon";
 
 // ---------------------------------------------------------------------------
 // Position + style config. (`verticalAlignment` is the horizontal left/right
@@ -233,7 +233,7 @@ export const PartyDeckLaunchSettingsButtonShell: FC<ShellProps> = ({
           className={joinClassNames(playSectionClasses.MenuButton, "partydeck-button")}
           onClick={handleClick}
         >
-          <FaUsers />
+          <PartyDeckIcon />
         </Button>
       </Focusable>
     </Focusable>

@@ -6,17 +6,16 @@ import {
   staticClasses,
 } from "@decky/ui";
 import { definePlugin } from "@decky/api";
-import { FaUsers, FaCog } from "react-icons/fa";
+import { FaCog } from "react-icons/fa";
+import { PartyDeckIcon } from "./lib/PartyDeckIcon";
 import { patchGameButton, unpatchGameButton } from "./game-launch/GameButtonPatch";
 import {
   patchShortcutRedirect,
   unpatchShortcutRedirect,
 } from "./shortcut/ShortcutRedirectPatch";
 import { registerGameSettingsRoute } from "./game-launch/GameSettingsRoute";
-import {
-  registerSettingsRoute,
-  SETTINGS_ROUTE,
-} from "./settings/SettingsRoute";
+import { registerSettingsRoute } from "./settings/SettingsRoute";
+import { SETTINGS_ROUTE } from "./lib/routes";
 
 function Content() {
   const openSettings = () => {
@@ -44,7 +43,7 @@ export default definePlugin(() => {
     name: "PartyDeck",
     titleView: <div className={staticClasses.Title}>PartyDeck</div>,
     content: <Content />,
-    icon: <FaUsers />,
+    icon: <PartyDeckIcon />,
     onDismount() {
       unpatchGameButton(gameButtonPatch);
       unpatchShortcutRedirect(shortcutRedirectPatch);

@@ -9,6 +9,7 @@
 // shortcut state.
 
 import { sleep } from "@decky/ui";
+import { getShortcutArtwork, type ShortcutArtwork } from "./partydeckApi";
 
 const SHORTCUT_NAME = "PartyDeck";
 
@@ -98,6 +99,46 @@ async function waitForOverview(
 // @decky/ui's App.d.ts: EAppType.Shortcut = 1073741824).
 const APP_TYPE_SHORTCUT = 1073741824;
 
+// ELibraryAssetType values (per @decky/ui's App.d.ts — it's a declared ambient
+// enum, so the values can't be imported at runtime). The hero never shows on
+// our (redirected-away-from) app page, but Steam also uses it in the main-menu
+// overlay header while the shortcut is running.
+const ARTWORK_ASSET_TYPES: ReadonlyArray<
+  [keyof ShortcutArtwork, number]
+> = [
+  ["capsule", 0], // portrait grid
+  ["hero", 1],
+  ["logo", 2],
+  ["header", 3], // wide capsule (horizontal rows, main-menu entry)
+];
+
+// Give the shortcut its library artwork + icon so it looks like a real app in
+// Steam's overlays (main menu, "now playing") instead of a blank grey tile.
+// Purely cosmetic: every step is best-effort and failures are swallowed.
+// Re-applied on each launch — idempotent, and it repairs art lost to Steam's
+// grid cache being cleared or the plugin being reinstalled.
+async function applyShortcutArtwork(appId: number): Promise<void> {
+  try {
+    const art = await getShortcutArtwork();
+    for (const [key, assetType] of ARTWORK_ASSET_TYPES) {
+      const base64 = art[key];
+      if (typeof base64 === "string" && base64.length > 0) {
+        await SteamClient.Apps.SetCustomArtworkForApp(
+          appId,
+          base64,
+          "png",
+          assetType
+        );
+      }
+    }
+    if (art.icon_path) {
+      SteamClient.Apps.SetShortcutIcon(appId, art.icon_path);
+    }
+  } catch (e) {
+    console.warn("PartyDeck: applying shortcut artwork failed", e);
+  }
+}
+
 // Find our existing PartyDeck shortcut so we reuse one entry instead of creating
 // duplicates. Matches on our display name + the shortcut app_type. Hidden apps
 // remain in appStore.allApps (hiding is a collection attribute, not removal), so
@@ -186,6 +227,8 @@ export async function launchViaShortcut(
 
   // 100 = ELaunchSource._2ftLibraryDetails (see @decky/ui App.d.ts ELaunchSource).
   SteamClient.Apps.RunGame(gameId, "", -1, 100);
+  // After RunGame so the (backend roundtrip + art writes) never delay the launch.
+  void applyShortcutArtwork(appId);
   return appId;
 }
 

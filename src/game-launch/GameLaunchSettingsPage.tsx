@@ -5,7 +5,7 @@
 
 import { Focusable, Navigation, Spinner } from "@decky/ui";
 import { toaster } from "@decky/api";
-import { SETTINGS_ROUTE } from "../settings/SettingsRoute";
+import { SETTINGS_ROUTE } from "../lib/routes";
 import { FC, useEffect, useMemo, useState } from "react";
 import {
   listHandlers,
@@ -15,10 +15,11 @@ import {
   setupPartydeck,
   type Handler,
 } from "../lib/partydeckApi";
-import { launchViaShortcut } from "../shortcut/steamShortcut";
-import { playLaunchGameSound } from "../lib/navSound";
-import { getControllers } from "../lib/steamInput";
+import { launchViaShortcut } from "../lib/steamShortcut";
+import { playLaunchGameSound } from "./navSound";
+import { getControllers } from "./steamInput";
 import { FaExclamationTriangle } from "react-icons/fa";
+import { PartyDeckIcon } from "../lib/PartyDeckIcon";
 import { PlayerGrid } from "./PlayerGrid";
 import { StartButton } from "./StartButton";
 import { usePlayerLobby } from "./usePlayerLobby";
@@ -175,6 +176,17 @@ export const GameLaunchSettingsPage: FC = () => {
             minWidth: 0,
           }}
         >
+          {/* fontSize (not width/height) so the 1em icon tracks the title size;
+              baseline alignment in the row keeps it sitting on the text line.
+              translateY compensates the square viewBox's vertical letterbox
+              ((1 - 39.3/48.9)/2 ≈ 0.1em) so the glyph bottom hits the baseline. */}
+          <PartyDeckIcon
+            style={{
+              fontSize: "1.3rem",
+              flexShrink: 0,
+              transform: "translateY(0.1em)",
+            }}
+          />
           <span
             style={{
               fontSize: "1.3rem",
