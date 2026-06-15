@@ -120,6 +120,23 @@ export interface ProtonStatus {
 export const listProtonRunners = callable<[], ProtonRunner[]>(
   "list_proton_runners",
 );
+
+// An installed GE-Proton runner on disk (newest first), with its size so the
+// UI can show what cleanup would reclaim.
+export interface InstalledGeRuntime {
+  name: string;
+  path: string;
+  size_bytes: number;
+}
+export const installedGeRuntimes = callable<[], InstalledGeRuntime[]>(
+  "installed_ge_runtimes",
+);
+export const deleteGeRuntime = callable<[name: string], void>(
+  "delete_ge_runtime",
+);
+export const deleteAllGeRuntimes = callable<[], number>(
+  "delete_all_ge_runtimes",
+);
 export const protonStatus = callable<[], ProtonStatus>("proton_status");
 export const downloadProton = callable<
   [update_ge: boolean],

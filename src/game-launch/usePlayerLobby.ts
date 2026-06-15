@@ -41,7 +41,16 @@ const STALE_TICK_MS = 500;
 // events) on purpose — the stream delivers every physical press/release per
 // controller regardless of where Steam's UI focus is, so a focus move mid-hold
 // can't strand a running timer (the old useHoldToExit bug).
-export function usePlayerLobby(profiles: string[], onExit: () => void) {
+// `joinsBlocked` covers every non-lobby state the page can be in (loading, no
+// handler, Proton-runtime gate, …). The SteamClient.Input stream runs whenever
+// this page is mounted, regardless of what's rendered, so without this a player
+// could press A and silently "join" behind an error screen. Sleep-mode is
+// gated separately below (controllerOrderBroken) since it's detected here.
+export function usePlayerLobby(
+  profiles: string[],
+  onExit: () => void,
+  joinsBlocked = false,
+) {
   const [players, setPlayers] = useState<Player[]>([]);
 
   // Steam's XInput slot assignment collapses after sleep/wake (a known Steam
@@ -64,6 +73,9 @@ export function usePlayerLobby(profiles: string[], onExit: () => void) {
   }, []);
   const orderBrokenRef = useRef(controllerOrderBroken);
   orderBrokenRef.current = controllerOrderBroken;
+
+  const joinsBlockedRef = useRef(joinsBlocked);
+  joinsBlockedRef.current = joinsBlocked;
 
   // Latest profiles in a ref so the input callback (registered once) always
   // sees the current pool without re-subscribing on every profile change.
@@ -236,6 +248,7 @@ export function usePlayerLobby(profiles: string[], onExit: () => void) {
       if (Date.now() < armedAtRef.current) return;
 
       if (button === BUTTON_A) {
+        if (joinsBlockedRef.current) return; // error gate (Proton, loading, …) -> no joins
         if (orderBrokenRef.current) return; // Steam slot collapse -> joins disabled
         if (profilesRef.current.length === 0) return; // no profiles -> can't join
         setPlayers((prev) => {
@@ -250,11 +263,12 @@ export function usePlayerLobby(profiles: string[], onExit: () => void) {
           // or duplicate nXInputIndex.
           if (ctrl.xinput < 0) return prev;
           if (prev.some((p) => p.xinput === ctrl.xinput)) return prev;
+          // Assign the first unused profile. If every profile is already taken,
+          // join with no profile (null) rather than duplicating one — the cell
+          // shows "No profile" and Start stays disabled until it's resolved.
           const taken = new Set(prev.map((p) => p.profile));
           const nextProfile =
-            profilesRef.current.find((p) => !taken.has(p)) ??
-            profilesRef.current[0] ??
-            null;
+            profilesRef.current.find((p) => !taken.has(p)) ?? null;
           playJoinSound();
           return [
             ...prev,
@@ -278,13 +292,28 @@ export function usePlayerLobby(profiles: string[], onExit: () => void) {
     };
   }, [cancelLeave, cancelAllLeaves, cancelExitHolds, startExitHold]);
 
-  const setProfile = useCallback((controllerIndex: number, profile: string) => {
-    setPlayers((prev) =>
-      prev.map((p) =>
-        p.controllerIndex === controllerIndex ? { ...p, profile } : p,
-      ),
-    );
-  }, []);
+  // `profile === null` clears it (lets a player temporarily free their profile
+  // so someone else can take it). A non-null profile already held by ANOTHER
+  // player is rejected — the picker disables those, but guard here too so the
+  // invariant (no two players share a profile) holds regardless of caller.
+  const setProfile = useCallback(
+    (controllerIndex: number, profile: string | null) => {
+      setPlayers((prev) => {
+        if (
+          profile !== null &&
+          prev.some(
+            (p) => p.controllerIndex !== controllerIndex && p.profile === profile,
+          )
+        ) {
+          return prev;
+        }
+        return prev.map((p) =>
+          p.controllerIndex === controllerIndex ? { ...p, profile } : p,
+        );
+      });
+    },
+    [],
+  );
 
   // If the slot collapse happens while players are already joined, drop them —
   // their captured slots are now unreliable, and the warning state replaces the
@@ -292,6 +321,13 @@ export function usePlayerLobby(profiles: string[], onExit: () => void) {
   useEffect(() => {
     if (controllerOrderBroken) setPlayers([]);
   }, [controllerOrderBroken]);
+
+  // Entering any error/non-lobby state hides the grid; drop joined players so a
+  // stale lobby doesn't reappear when the block clears (e.g. after a download
+  // finishes the user re-joins fresh).
+  useEffect(() => {
+    if (joinsBlocked) setPlayers([]);
+  }, [joinsBlocked]);
 
   return {
     players,

@@ -111,17 +111,20 @@ interface Props {
   player: Player;
   index: number;
   profiles: string[];
+  /** Profiles held by OTHER players — shown but disabled in this picker. */
+  takenProfiles: Set<string>;
   /** True while this player's controller is mid B-hold to leave. */
   leaving: boolean;
   /** Glyph-left row layout for 3+ players, where stacked cards overflow. */
   compact: boolean;
-  onProfileChange: (profile: string) => void;
+  onProfileChange: (profile: string | null) => void;
 }
 
 export const PlayerCell: FC<Props> = ({
   player,
   index,
   profiles,
+  takenProfiles,
   leaving,
   compact,
   onProfileChange,
@@ -131,15 +134,28 @@ export const PlayerCell: FC<Props> = ({
   const openProfileMenu = () =>
     showContextMenu(
       <Menu label={`Player ${index + 1} profile`}>
-        {profiles.map((p) => (
-          <MenuItem
-            key={p}
-            selected={p === player.profile}
-            onSelected={() => onProfileChange(p)}
-          >
-            {p}
-          </MenuItem>
-        ))}
+        {/* "None" frees this player's profile so another player can take it. */}
+        <MenuItem
+          selected={player.profile === null}
+          onSelected={() => onProfileChange(null)}
+        >
+          None
+        </MenuItem>
+        {profiles.map((p) => {
+          const taken = takenProfiles.has(p);
+          return (
+            <MenuItem
+              key={p}
+              selected={p === player.profile}
+              disabled={taken}
+              onSelected={() => {
+                if (!taken) onProfileChange(p);
+              }}
+            >
+              {taken ? `${p} (in use)` : p}
+            </MenuItem>
+          );
+        })}
       </Menu>,
     );
 

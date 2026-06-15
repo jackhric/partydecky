@@ -3,11 +3,18 @@
 // controller that joins gets a player cell with a profile picker; Start launches
 // the assigned instances.
 
-import { DialogButton, Focusable, Navigation, Spinner } from "@decky/ui";
+import {
+  DialogButton,
+  Focusable,
+  Navigation,
+  ProgressBar,
+  Spinner,
+} from "@decky/ui";
 import { toaster } from "@decky/api";
 import { SETTINGS_ROUTE } from "../lib/routes";
 import { FC, useCallback, useEffect, useMemo, useState } from "react";
 import {
+  downloadProton,
   listHandlers,
   listProfiles,
   partydeckStatus,
@@ -20,7 +27,7 @@ import {
 import { launchViaShortcut } from "../lib/steamShortcut";
 import { playExitMenuSound, playLaunchGameSound } from "./navSound";
 import { getControllers } from "./steamInput";
-import { FaCog, FaDownload, FaExclamationTriangle } from "react-icons/fa";
+import { FaDownload, FaExclamationTriangle } from "react-icons/fa";
 import { PartyDeckIcon } from "../lib/PartyDeckIcon";
 import { PlayerGrid } from "./PlayerGrid";
 import { StartButton } from "./StartButton";
@@ -78,22 +85,46 @@ export const GameLaunchSettingsPage: FC = () => {
   // Proton games can't launch until umu has its runtime + runner on disk —
   // otherwise the launch sits on a black screen downloading gigabytes.
   const protonGate = handler?.win === true && proton?.needs_download === true;
+  const protonDownloading = proton?.download_running === true;
 
-  // While gated, poll so finishing the download in settings clears the gate on
-  // return (Quick Access overlay navigation doesn't always remount this page).
+  // Poll while gated OR while a download runs. The download is a backend
+  // background task that outlives this page, so re-mounting (back out / return)
+  // re-reads its live state via the mount effect above; this keeps it ticking
+  // so progress and gate-clearing update without a manual refresh.
   useEffect(() => {
-    if (!protonGate) return undefined;
+    if (!protonGate && !protonDownloading) return undefined;
     const t = setInterval(
       () => protonStatus().then(setProton).catch(() => {}),
-      3000,
+      1500,
     );
     return () => clearInterval(t);
-  }, [protonGate]);
+  }, [protonGate, protonDownloading]);
 
   const onExit = useCallback(() => {
     playExitMenuSound();
     Navigation.NavigateBack();
   }, []);
+
+  // Kick off the latest-GE download from the gate. The backend runs it as a
+  // background task that outlives this page; we optimistically flip the local
+  // status to download_running so the bar shows immediately, then let the poll
+  // take over (and reconcile on the next mount if the user backs out).
+  const onInstallProton = useCallback(async () => {
+    try {
+      const res = await downloadProton(true);
+      if (res.started === false) return; // already running — poll will show it
+      setProton((p) => (p ? { ...p, download_running: true, download_error: null } : p));
+    } catch (e) {
+      console.error("[partydeck] proton install failed to start", e);
+      toaster.toast({ title: "PartyDeck", body: `Install failed: ${e}` });
+    }
+  }, []);
+  // Any non-lobby screen blocks joins (sleep-mode is gated inside the hook).
+  // protonGate covers both "needs download" and the in-progress download state,
+  // since needs_download stays true until the runtime lands.
+  const joinsBlocked =
+    handlers === null || profiles === null || handler === null || protonGate;
+
   const {
     players,
     setProfile,
@@ -101,12 +132,14 @@ export const GameLaunchSettingsPage: FC = () => {
     leavingControllers,
     exitRemainingMs,
     cancelExitHolds,
-  } = usePlayerLobby(profiles ?? [], onExit);
+  } = usePlayerLobby(profiles ?? [], onExit, joinsBlocked);
 
   const canStart =
     !controllerOrderBroken &&
     players.length > 0 &&
-    players.every((p) => p.profile !== null);
+    players.every((p) => p.profile !== null) &&
+    // No two players may share a profile.
+    new Set(players.map((p) => p.profile)).size === players.length;
 
   const onStart = async () => {
     if (!canStart || handler === null) return;
@@ -153,6 +186,21 @@ export const GameLaunchSettingsPage: FC = () => {
         toaster.toast({
           title: "PartyDeck",
           body: "Controller assignment is stale — re-join the controllers and try again.",
+        });
+        return;
+      }
+
+      // Guard: profiles must be present and distinct. canStart already enforces
+      // this so the button is disabled, but re-check in case state changed
+      // between render and click (e.g. a player cleared their profile).
+      const profileNames = payload.map((p) => p.profile);
+      if (
+        profileNames.some((p) => !p) ||
+        new Set(profileNames).size !== profileNames.length
+      ) {
+        toaster.toast({
+          title: "PartyDeck",
+          body: "Each player needs a unique profile — two players can't share one.",
         });
         return;
       }
@@ -342,28 +390,59 @@ export const GameLaunchSettingsPage: FC = () => {
         >
           <FaDownload size={48} style={{ opacity: 0.4 }} />
           <div style={{ fontSize: "1.1rem", fontWeight: 600 }}>
-            Proton runtime needed
+            {protonDownloading
+              ? "Installing Proton-GE…"
+              : "Proton runtime needed"}
           </div>
-          <div style={{ fontSize: "0.9rem", opacity: 0.6, maxWidth: "32rem" }}>
-            PartyDeck Proton runtime needs to be downloaded before launching
-          </div>
-          <DialogButton
-            onClick={() => Navigation.Navigate(`${SETTINGS_ROUTE}/proton`)}
-            style={{
-              marginTop: "0.5rem",
-              width: "auto",
-              minWidth: 0,
-              height: "48px",
-              flexShrink: 0,
-              padding: "0 2rem",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: "0.5rem",
-            }}
-          >
-            <FaCog size={16} /> Proton Settings
-          </DialogButton>
+          {protonDownloading ? (
+            <div style={{ width: "min(28rem, 80%)", marginTop: "0.5rem" }}>
+              {/* Steam's ProgressBar only enters indeterminate mode when
+                  `indeterminate && nProgress == 0` — and it uses loose `==`,
+                  so an undefined nProgress fails the check and it renders an
+                  empty 0% bar. Pass an explicit 0. */}
+              <ProgressBar indeterminate nProgress={0} nTransitionSec={1} />
+              <div
+                style={{
+                  fontSize: "0.85rem",
+                  opacity: 0.6,
+                  marginTop: "0.5rem",
+                }}
+              >
+                Downloading the latest Proton-GE runtime. This may take a few
+                minutes — you can leave this screen; it keeps going.
+              </div>
+            </div>
+          ) : (
+            <>
+              <div
+                style={{ fontSize: "0.9rem", opacity: 0.6, maxWidth: "32rem" }}
+              >
+                {proton?.download_error
+                  ? `Last attempt failed: ${proton.download_error}`
+                  : "PartyDeck's Proton runtime must be downloaded before launching."}
+              </div>
+              <DialogButton
+                onClick={onInstallProton}
+                style={{
+                  marginTop: "0.5rem",
+                  width: "auto",
+                  minWidth: 0,
+                  height: "48px",
+                  flexShrink: 0,
+                  padding: "0 2rem",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "0.5rem",
+                }}
+              >
+                <FaDownload size={16} />{" "}
+                {proton?.download_error
+                  ? "Retry install"
+                  : "Install Latest Proton-GE Runtime"}
+              </DialogButton>
+            </>
+          )}
         </Focusable>
       ) : (
         <div

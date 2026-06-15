@@ -77,6 +77,27 @@ def _home() -> Path:
     return Path(os.environ.get("HOME", "/home/deck"))
 
 
+def _deinjected_env() -> dict:
+    """os.environ with Decky's PyInstaller linker injection stripped.
+
+    PluginLoader is a PyInstaller bundle: its bootloader prepends its own
+    extraction dir (/tmp/_MEIxxxx) to LD_LIBRARY_PATH, which ships an OpenSSL
+    3.0 libcrypto. That leaks into any child we spawn — and umu-run is itself a
+    PyInstaller app, so its bundled libcrypto loses to the leaked one and its
+    `import ssl` dies with `OPENSSL_3.x not found`, breaking every download.
+    PyInstaller stashes the pre-launch value in <VAR>_ORIG; restore it (or drop
+    the var) so the child links against its own / the system libraries.
+    """
+    env = dict(os.environ)
+    for var in ("LD_LIBRARY_PATH", "LD_PRELOAD"):
+        orig = env.pop(f"{var}_ORIG", None)
+        if orig is not None:
+            env[var] = orig
+        else:
+            env.pop(var, None)
+    return env
+
+
 def _plugin_dir() -> Path:
     return Path(os.environ.get("DECKY_PLUGIN_DIR", Path(__file__).resolve().parent.parent))
 
@@ -128,22 +149,58 @@ def is_binary_installed() -> bool:
     return _binary_path().is_file() and os.access(_binary_path(), os.X_OK)
 
 
+def _gamescope_display() -> str | None:
+    """An X display the binary can open, discovered from gamescope's live X
+    sockets (/tmp/.X11-unix/X<n>). Lowest number first — gamescope's primary
+    Xwayland is :0. Returns None if no socket exists (session not up)."""
+    socket_dir = Path("/tmp/.X11-unix")
+    nums = []
+    try:
+        for sock in socket_dir.glob("X*"):
+            suffix = sock.name[1:]
+            if suffix.isdigit():
+                nums.append(int(suffix))
+    except OSError:
+        return None
+    return f":{min(nums)}" if nums else None
+
+
+def _binary_env() -> dict:
+    """Environment for shelling out to the PartyDeck binary.
+
+    HOME is set explicitly: the binary finds its data dir via $HOME, which the
+    Decky backend env may not carry.
+
+    DISPLAY is injected when absent: the binary spins up eframe/winit even for
+    headless subcommands (config show / profile list), so it needs a display. We
+    used to rely on the backend inheriting DISPLAY from the gamescope session,
+    but the Decky plugin_loader service environment doesn't reliably carry it
+    (e.g. after a service restart), so config reads crash with "neither
+    WAYLAND_DISPLAY nor WAYLAND_SOCKET nor DISPLAY is set". Discover a live
+    gamescope X socket and point DISPLAY at it. Don't override an existing
+    DISPLAY/WAYLAND_DISPLAY that's already working.
+    """
+    env = {**os.environ, "HOME": str(_home())}
+    if not env.get("DISPLAY") and not env.get("WAYLAND_DISPLAY"):
+        display = _gamescope_display()
+        if display:
+            env["DISPLAY"] = display
+    return env
+
+
 # Headless queries — shell out to PartyDeck's subcommands and parse their JSON.
 
 
 def _run_partydeck_json(*args: str) -> object:
-    # HOME is set explicitly: the binary finds its data dir via $HOME, which the
-    # Decky backend env may not carry.
     binary = _binary_path()
     if not is_binary_installed():
         raise RuntimeError(f"PartyDeck binary not installed at {binary}")
 
-    env = {**os.environ, "HOME": str(_home())}
     proc = subprocess.run(  # noqa: S603 (fixed binary, no shell)
         [str(binary), *args],
         capture_output=True,
         text=True,
-        env=env,
+        env=_binary_env(),
         check=False,
     )
     if proc.returncode != 0:
@@ -170,12 +227,11 @@ def _run_partydeck(*args: str) -> None:
     binary = _binary_path()
     if not is_binary_installed():
         raise RuntimeError(f"PartyDeck binary not installed at {binary}")
-    env = {**os.environ, "HOME": str(_home())}
     proc = subprocess.run(  # noqa: S603 (fixed binary, no shell)
         [str(binary), *args],
         capture_output=True,
         text=True,
-        env=env,
+        env=_binary_env(),
         check=False,
     )
     if proc.returncode != 0:
@@ -277,27 +333,112 @@ def _installed_ge_names() -> list[str]:
     return sorted(names, key=_version_key, reverse=True)
 
 
+def _ge_runtime_dir(name: str) -> Path:
+    """Resolve an installed GE runner dir by name, guarding against traversal.
+    Returns the first compat dir that holds it; raises if the name is unsafe or
+    no such GE runner exists."""
+    if not name.startswith("GE-Proton") or "/" in name or name in (".", ".."):
+        raise ValueError(f"Invalid GE runtime name: {name!r}")
+    for base in _compat_dirs():
+        d = base / name
+        if _is_proton_runner(d):
+            return d
+    raise FileNotFoundError(f"GE runtime not installed: {name}")
+
+
+def _dir_size_bytes(path: Path) -> int:
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for f in files:
+            fp = Path(root) / f
+            try:
+                total += fp.lstat().st_size  # don't follow symlinks (count the link)
+            except OSError:
+                pass
+    return total
+
+
+def installed_ge_runtimes() -> list[dict]:
+    """Installed GE-Proton runners with on-disk size, newest first."""
+    out = []
+    for name in _installed_ge_names():
+        try:
+            d = _ge_runtime_dir(name)
+        except (ValueError, FileNotFoundError):
+            continue
+        out.append({"name": name, "path": str(d), "size_bytes": _dir_size_bytes(d)})
+    return out
+
+
+def _unpin_if(name: str) -> None:
+    """Clear proton_version if it points at the named runner, so proton_status()
+    re-pins to the next newest installed GE (its default-pin policy)."""
+    try:
+        cfg = get_config()
+        if cfg.get("proton_version", "") == name:
+            cfg["proton_version"] = ""
+            set_config(cfg)
+            decky.logger.info("Unpinned proton_version (deleted %s)", name)
+    except Exception as e:  # noqa: BLE001 — deletion already succeeded; pin is best-effort
+        decky.logger.warning("Could not unpin %s: %s", name, e)
+
+
+def delete_ge_runtime(name: str) -> None:
+    """Delete one installed GE-Proton runner from disk."""
+    d = _ge_runtime_dir(name)
+    decky.logger.info("Deleting GE runtime %s (%s)", name, d)
+    shutil.rmtree(d)
+    _unpin_if(name)
+
+
+def delete_all_ge_runtimes() -> int:
+    """Delete every installed GE-Proton runner. Returns how many were removed."""
+    removed = 0
+    for name in _installed_ge_names():
+        try:
+            d = _ge_runtime_dir(name)
+        except (ValueError, FileNotFoundError):
+            continue
+        shutil.rmtree(d, ignore_errors=True)
+        _unpin_if(name)
+        removed += 1
+    decky.logger.info("Deleted %d GE runtime(s)", removed)
+    return removed
+
+
 _GE_LATEST_CACHE: tuple[float, str | None] | None = None
 _GE_CACHE_TTL = 15 * 60
 
 
-def _ge_latest() -> str | None:
+def _ge_latest(force: bool = False) -> str | None:
     """Latest GE-Proton release tag from GitHub (== its install dir name), or
-    None when the check fails. Cached so lobby/page polls don't hammer the API."""
+    None when the check fails. Cached so lobby/page polls don't hammer the API;
+    pass force=True to skip the cache (e.g. a user-initiated install/retry, where
+    a stale 'offline' from an earlier outage shouldn't block a fresh attempt)."""
     global _GE_LATEST_CACHE
     now = time.monotonic()
-    if _GE_LATEST_CACHE is not None and now - _GE_LATEST_CACHE[0] < _GE_CACHE_TTL:
+    if (
+        not force
+        and _GE_LATEST_CACHE is not None
+        and now - _GE_LATEST_CACHE[0] < _GE_CACHE_TTL
+    ):
         return _GE_LATEST_CACHE[1]
     tag = None
     try:
+        # Use the releases LIST (newest-first), not /releases/latest. GitHub's
+        # gateway intermittently 504s on /releases/latest for repos with a huge
+        # release history (proton-ge-custom is one); the list endpoint is served
+        # by a different path and stays up. First element == newest release.
         req = urllib.request.Request(
-            "https://api.github.com/repos/GloriousEggroll/proton-ge-custom/releases/latest",
+            "https://api.github.com/repos/GloriousEggroll/proton-ge-custom/releases?per_page=1",
             headers={"User-Agent": _PASTE_USER_AGENT},
         )
         with urllib.request.urlopen(  # noqa: S310 (fixed https URL)
             req, timeout=5, context=get_ssl_context()
         ) as resp:
-            tag = json.load(resp).get("tag_name") or None
+            releases = json.load(resp)
+            if isinstance(releases, list) and releases:
+                tag = releases[0].get("tag_name") or None
     except Exception as e:
         decky.logger.warning("GE latest-release check failed: %s", e)
     _GE_LATEST_CACHE = (now, tag)
@@ -375,9 +516,22 @@ def prefetch_proton(update_ge: bool = False) -> None:
     if not umu_run.is_file():
         raise RuntimeError("PartyDeck not installed yet — run setup first")
 
+    # Resolving the "GE-Proton" codename means fetching the latest release from
+    # GitHub. If that API is unreachable (offline, or a GitHub outage) and no GE
+    # is already on disk to fall back to, umu fails deep inside with a cryptic
+    # "PROTONPATH not set or is empty". Catch it here and surface a clear cause.
+    if protonpath == "GE-Proton" and not _installed_ge_names():
+        # Live probe (skip the cache): a user clicking install/retry deserves a
+        # fresh check, not a stale "offline" cached during an earlier outage.
+        if _ge_latest(force=True) is None:
+            raise RuntimeError(
+                "Can't reach GitHub to download Proton-GE — check your internet "
+                "connection and try again (GitHub may also be temporarily down)."
+            )
+
     pfx = _runtime_dir() / "prefetch-pfx"
     env = {
-        **os.environ,
+        **_deinjected_env(),
         "HOME": str(_home()),
         "PROTONPATH": protonpath,
         "PROTON_VERB": "run",
@@ -402,18 +556,28 @@ def prefetch_proton(update_ge: bool = False) -> None:
     if not after["runtime_installed"] or not after["runner_installed"]:
         raise RuntimeError(f"Proton download incomplete: {proc.stderr.strip()[-500:]}")
 
-    # Keep the pin policy: a fresh latest-GE download repins a GE pin (or a
-    # blank config, which proton_status() above already pinned if possible).
-    if update_ge and status["configured"].startswith("GE-Proton"):
+    # Pin to the version that just downloaded. A GE install fired from the gate
+    # (or an explicit "install latest") should leave proton_version pointing at
+    # the freshly-installed newest GE, unless the user has deliberately pinned a
+    # *different specific* runner (a named non-GE tool or an absolute path) we
+    # shouldn't override.
+    cfg_pin = status["configured"]
+    pin_to_latest = (
+        update_ge
+        or status["mode"] == "auto-ge"
+        or cfg_pin in ("", "GE-Proton", "GE-Latest")
+        or cfg_pin.startswith("GE-Proton")
+    )
+    if pin_to_latest:
         try:
             cfg = get_config()
             ge_names = _installed_ge_names()
             if ge_names and cfg.get("proton_version") != ge_names[0]:
                 cfg["proton_version"] = ge_names[0]
                 set_config(cfg)
-                decky.logger.info("Repinned proton_version to %s", ge_names[0])
+                decky.logger.info("Pinned proton_version to %s", ge_names[0])
         except Exception as e:
-            decky.logger.warning("repin after update failed: %s", e)
+            decky.logger.warning("pin after download failed: %s", e)
 
 
 def _sha256(path: Path) -> str:
@@ -571,6 +735,15 @@ def write_launcher_script(
     binary = _binary_path()
 
     if handler and players:
+        # Authoritative duplicate-profile guard: two instances sharing a profile
+        # would fight over the same on-disk save/config dir. The frontend already
+        # prevents this, but never trust the payload — a stale/buggy caller can't
+        # launch a broken session.
+        profiles = [p.get("profile") for p in players]
+        if any(not name for name in profiles):
+            raise ValueError("Every player must have a profile assigned.")
+        if len(set(profiles)) != len(profiles):
+            raise ValueError("Two players cannot share the same profile.")
         players_file = runtime / PLAYERS_NAME
         players_file.write_text(json.dumps(players))
         # `--kwin --fullscreen launch ...` runs the headless launch INSIDE the

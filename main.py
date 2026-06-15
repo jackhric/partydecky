@@ -81,6 +81,19 @@ class Plugin:
     async def list_proton_runners(self) -> list:
         return await self.loop.run_in_executor(None, partydeck.list_proton_runners)
 
+    async def installed_ge_runtimes(self) -> list:
+        return await self.loop.run_in_executor(None, partydeck.installed_ge_runtimes)
+
+    async def delete_ge_runtime(self, name: str) -> None:
+        return await self.loop.run_in_executor(
+            None, partydeck.delete_ge_runtime, name
+        )
+
+    async def delete_all_ge_runtimes(self) -> int:
+        return await self.loop.run_in_executor(
+            None, partydeck.delete_all_ge_runtimes
+        )
+
     async def proton_status(self) -> dict:
         status = await self.loop.run_in_executor(None, partydeck.proton_status)
         task = getattr(self, "_proton_task", None)

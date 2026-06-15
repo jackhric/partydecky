@@ -11,7 +11,7 @@ interface Props {
   exitRemainingMs: number | null;
   /** Controllers currently mid B-hold to leave (drives the cell indicator). */
   leavingControllers: Set<number>;
-  onProfileChange: (controllerIndex: number, profile: string) => void;
+  onProfileChange: (controllerIndex: number, profile: string | null) => void;
   onOpenSettings: () => void;
 }
 
@@ -125,6 +125,18 @@ export const PlayerGrid: FC<Props> = ({
           player={p}
           index={i}
           profiles={profiles}
+          // Profiles held by OTHER players — disabled in this cell's picker so
+          // two players can't share one.
+          takenProfiles={
+            new Set(
+              players
+                .filter(
+                  (o) =>
+                    o.controllerIndex !== p.controllerIndex && o.profile !== null,
+                )
+                .map((o) => o.profile as string),
+            )
+          }
           leaving={leavingControllers.has(p.controllerIndex)}
           compact={players.length >= 3}
           onProfileChange={(profile) => onProfileChange(p.controllerIndex, profile)}
