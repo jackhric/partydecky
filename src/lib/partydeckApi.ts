@@ -33,7 +33,7 @@ export interface LaunchPlayer {
 export interface LauncherInfo {
   exe: string;
   directory: string;
-  log: string;
+  log_dir: string;
 }
 
 export interface PartydeckStatus {
@@ -93,6 +93,57 @@ export const preparePartydeck = callable<
   [appid: number, handler: string, players: LaunchPlayer[]],
   LauncherInfo
 >("prepare_partydeck");
+
+// A Proton runner umu can launch with. "custom" = compatibilitytools.d entry,
+// written to config as a bare name (offline lookup); "valve" = a Steam-installed
+// Proton from steamapps/common, written as an absolute path.
+export interface ProtonRunner {
+  name: string;
+  value: string;
+  kind: "custom" | "valve";
+}
+
+// What the next win-handler launch needs. The null states on the update fields
+// mean "check unavailable" (offline) and never set needs_download on their own.
+export interface ProtonStatus {
+  configured: string;
+  mode: "auto-ge" | "named" | "path";
+  runner_installed: boolean;
+  runtime_installed: boolean;
+  latest_ge: string | null;
+  ge_update_available: boolean | null;
+  needs_download: boolean;
+  download_running: boolean;
+  download_error: string | null;
+}
+
+export const listProtonRunners = callable<[], ProtonRunner[]>(
+  "list_proton_runners",
+);
+export const protonStatus = callable<[], ProtonStatus>("proton_status");
+export const downloadProton = callable<
+  [update_ge: boolean],
+  { started: boolean; reason?: string }
+>("download_proton");
+
+// One per-session launcher run log. timestamp = session start (epoch seconds,
+// parsed from the filename); appid/handler are present when the run was
+// prepared for a specific game (absent for GUI-fallback runs).
+export interface RunLog {
+  filename: string;
+  timestamp: number;
+  size_bytes: number;
+  appid: number | null;
+  handler: string | null;
+}
+
+export const listRunLogs = callable<[], RunLog[]>("list_run_logs");
+
+// Uploads go through the backend (the CEF origin can't POST to dpaste.com).
+// Anonymous dpaste pastes are unlisted and expire after a month; no API key.
+export const uploadRunLog = callable<[filename: string], { url: string }>(
+  "upload_run_log",
+);
 
 // Library artwork for the PartyDeck shortcut: base64 PNGs for
 // SetCustomArtworkForApp, plus an on-device path for SetShortcutIcon. Any

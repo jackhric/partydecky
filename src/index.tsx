@@ -25,8 +25,19 @@ function Content() {
   return (
     <PanelSection title="PartyDeck">
       <PanelSectionRow>
-        <ButtonItem layout="below" onClick={openSettings} icon={<FaCog />}>
-          Settings
+        {/* icon lives in the children, not the icon prop — with layout="below"
+            the icon prop renders in the label slot ABOVE the button. */}
+        <ButtonItem layout="below" onClick={openSettings}>
+          <span
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "0.5rem",
+            }}
+          >
+            <FaCog /> Settings
+          </span>
         </ButtonItem>
       </PanelSectionRow>
     </PanelSection>

@@ -3,27 +3,28 @@
 // controller that joins gets a player cell with a profile picker; Start launches
 // the assigned instances.
 
-import { Focusable, Navigation, Spinner } from "@decky/ui";
+import { DialogButton, Focusable, Navigation, Spinner } from "@decky/ui";
 import { toaster } from "@decky/api";
 import { SETTINGS_ROUTE } from "../lib/routes";
-import { FC, useEffect, useMemo, useState } from "react";
+import { FC, useCallback, useEffect, useMemo, useState } from "react";
 import {
   listHandlers,
   listProfiles,
   partydeckStatus,
   preparePartydeck,
+  protonStatus,
   setupPartydeck,
   type Handler,
+  type ProtonStatus,
 } from "../lib/partydeckApi";
 import { launchViaShortcut } from "../lib/steamShortcut";
-import { playLaunchGameSound } from "./navSound";
+import { playExitMenuSound, playLaunchGameSound } from "./navSound";
 import { getControllers } from "./steamInput";
-import { FaExclamationTriangle } from "react-icons/fa";
+import { FaCog, FaDownload, FaExclamationTriangle } from "react-icons/fa";
 import { PartyDeckIcon } from "../lib/PartyDeckIcon";
 import { PlayerGrid } from "./PlayerGrid";
 import { StartButton } from "./StartButton";
 import { usePlayerLobby } from "./usePlayerLobby";
-import { useHoldToExit } from "./useHoldToExit";
 
 // Reads the :appid out of the URL — routerHook.addRoute renders a bare
 // ComponentType, so there are no react-router params to thread.
@@ -52,6 +53,11 @@ export const GameLaunchSettingsPage: FC = () => {
   const [handlers, setHandlers] = useState<Handler[] | null>(null);
   const [profiles, setProfiles] = useState<string[] | null>(null);
 
+  // Not folded into `loading`: the status includes a best-effort network check
+  // that can take a few seconds cold — render the lobby immediately and swap in
+  // the download gate when the status lands.
+  const [proton, setProton] = useState<ProtonStatus | null>(null);
+
   useEffect(() => {
     listHandlers()
       .then(setHandlers)
@@ -59,6 +65,9 @@ export const GameLaunchSettingsPage: FC = () => {
     listProfiles()
       .then((ps) => setProfiles(ps.map((p) => p.name)))
       .catch(() => setProfiles([]));
+    protonStatus()
+      .then(setProton)
+      .catch(() => setProton(null));
   }, []);
 
   const handler = useMemo(
@@ -66,9 +75,33 @@ export const GameLaunchSettingsPage: FC = () => {
     [handlers, appId],
   );
 
-  const { players, setProfile, controllerOrderBroken, leavingControllers } =
-    usePlayerLobby(profiles ?? []);
-  const { onCancel, onButtonDown, onButtonUp, remainingMs } = useHoldToExit();
+  // Proton games can't launch until umu has its runtime + runner on disk —
+  // otherwise the launch sits on a black screen downloading gigabytes.
+  const protonGate = handler?.win === true && proton?.needs_download === true;
+
+  // While gated, poll so finishing the download in settings clears the gate on
+  // return (Quick Access overlay navigation doesn't always remount this page).
+  useEffect(() => {
+    if (!protonGate) return undefined;
+    const t = setInterval(
+      () => protonStatus().then(setProton).catch(() => {}),
+      3000,
+    );
+    return () => clearInterval(t);
+  }, [protonGate]);
+
+  const onExit = useCallback(() => {
+    playExitMenuSound();
+    Navigation.NavigateBack();
+  }, []);
+  const {
+    players,
+    setProfile,
+    controllerOrderBroken,
+    leavingControllers,
+    exitRemainingMs,
+    cancelExitHolds,
+  } = usePlayerLobby(profiles ?? [], onExit);
 
   const canStart =
     !controllerOrderBroken &&
@@ -86,6 +119,16 @@ export const GameLaunchSettingsPage: FC = () => {
         toaster.toast({
           title: "PartyDeck",
           body: "Installing PartyDeck — try Start again in a moment.",
+        });
+        return;
+      }
+
+      // Stale-state guard: players may have joined before the Proton status
+      // arrived; the gate screen handles the steady-state case.
+      if (handler.win && proton?.needs_download) {
+        toaster.toast({
+          title: "PartyDeck",
+          body: "Proton runtime needs to be downloaded — see PartyDeck Proton settings.",
         });
         return;
       }
@@ -138,12 +181,13 @@ export const GameLaunchSettingsPage: FC = () => {
 
   return (
     <Focusable
-      // Intercept B/Cancel here so a tap doesn't trigger Steam's instant back;
-      // exiting requires holding B (see useHoldToExit). The per-player tap-B
-      // leave is handled separately by the lobby input listener.
-      onCancel={onCancel}
-      onButtonDown={onButtonDown}
-      onButtonUp={onButtonUp}
+      // Consume B/Cancel so a tap never triggers Steam's instant back; exiting
+      // requires holding B, timed by the lobby's SteamClient.Input listener
+      // (see usePlayerLobby), which also handles the per-player tap-B leave.
+      onCancel={(e: CustomEvent) => e.stopPropagation?.()}
+      // Focus leaving the page (context menu, modal) can swallow the B-up, so
+      // treat it as a release.
+      onGamepadBlur={cancelExitHolds}
       style={{
         // Reserve Steam's top status bar AND bottom button bar (each ~40px) so
         // the page isn't clipped under either. --basicui-header-height is Steam's
@@ -221,7 +265,14 @@ export const GameLaunchSettingsPage: FC = () => {
       </div>
 
       {loading ? (
-        <div
+        // These informational branches have no buttons, but they must still
+        // contain something focusable: if gamepad focus sits outside the page,
+        // a B press bypasses our onCancel shield and Steam's default instant
+        // back-navigation fires. A Focusable with onActivate is itself
+        // focusable, so it anchors focus inside the page.
+        <Focusable
+          onActivate={() => {}}
+          noFocusRing
           style={{
             flex: 1,
             display: "flex",
@@ -230,9 +281,11 @@ export const GameLaunchSettingsPage: FC = () => {
           }}
         >
           <Spinner width={32} height={32} />
-        </div>
+        </Focusable>
       ) : !handler ? (
-        <div
+        <Focusable
+          onActivate={() => {}}
+          noFocusRing
           style={{
             flex: 1,
             display: "flex",
@@ -250,9 +303,11 @@ export const GameLaunchSettingsPage: FC = () => {
           <div style={{ fontSize: "0.9rem" }}>
             PartyDeck doesn't have split-screen support set up for {title}.
           </div>
-        </div>
+        </Focusable>
       ) : controllerOrderBroken ? (
-        <div
+        <Focusable
+          onActivate={() => {}}
+          noFocusRing
           style={{
             flex: 1,
             display: "flex",
@@ -272,7 +327,44 @@ export const GameLaunchSettingsPage: FC = () => {
             Steam's controller assignment, so players can't be matched to screens
             until you restart.
           </div>
-        </div>
+        </Focusable>
+      ) : protonGate ? (
+        <Focusable
+          style={{
+            flex: 1,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "1rem",
+            textAlign: "center",
+          }}
+        >
+          <FaDownload size={48} style={{ opacity: 0.4 }} />
+          <div style={{ fontSize: "1.1rem", fontWeight: 600 }}>
+            Proton runtime needed
+          </div>
+          <div style={{ fontSize: "0.9rem", opacity: 0.6, maxWidth: "32rem" }}>
+            PartyDeck Proton runtime needs to be downloaded before launching
+          </div>
+          <DialogButton
+            onClick={() => Navigation.Navigate(`${SETTINGS_ROUTE}/proton`)}
+            style={{
+              marginTop: "0.5rem",
+              width: "auto",
+              minWidth: 0,
+              height: "48px",
+              flexShrink: 0,
+              padding: "0 2rem",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "0.5rem",
+            }}
+          >
+            <FaCog size={16} /> Proton Settings
+          </DialogButton>
+        </Focusable>
       ) : (
         <div
           style={{
@@ -286,7 +378,7 @@ export const GameLaunchSettingsPage: FC = () => {
           <PlayerGrid
             players={players}
             profiles={profiles}
-            exitRemainingMs={remainingMs}
+            exitRemainingMs={exitRemainingMs}
             leavingControllers={leavingControllers}
             onProfileChange={setProfile}
             onOpenSettings={() =>

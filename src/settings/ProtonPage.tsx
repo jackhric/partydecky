@@ -4,30 +4,80 @@ import {
   DialogButton,
   DialogControlsSection,
   DialogControlsSectionHeader,
+  Dropdown,
   Field,
   Spinner,
-  TextField,
   ToggleField,
   showModal,
 } from "@decky/ui";
-import { FC, useEffect, useState } from "react";
-import { FaTrash } from "react-icons/fa";
-import { erasePrefixes } from "../lib/partydeckApi";
+import { toaster } from "@decky/api";
+import { FC, useEffect, useRef, useState } from "react";
+import { FaDownload, FaTrash } from "react-icons/fa";
+import {
+  ProtonRunner,
+  ProtonStatus,
+  downloadProton,
+  erasePrefixes,
+  listProtonRunners,
+  protonStatus,
+} from "../lib/partydeckApi";
 import { useConfig } from "./useConfig";
+
+const AUTO_GE = "GE-Proton"; // umu codename: resolve latest GE, downloading if needed
 
 export const ProtonPage: FC = () => {
   const { config, busy, error, setError, patch } = useConfig();
 
-  // Local buffer so typing doesn't fire a backend write per keystroke; commit
-  // on blur. Seeded from config once it loads.
-  const [version, setVersion] = useState("");
-  useEffect(() => {
-    if (config) setVersion(config.proton_version);
-  }, [config?.proton_version]);
+  const [runners, setRunners] = useState<ProtonRunner[] | null>(null);
+  const [status, setStatus] = useState<ProtonStatus | null>(null);
+  const wasDownloading = useRef(false);
 
-  const commitVersion = () => {
-    if (config && version !== config.proton_version) {
-      patch("proton_version", version);
+  const refresh = () => {
+    listProtonRunners()
+      .then(setRunners)
+      .catch(() => setRunners([]));
+    protonStatus()
+      .then(setStatus)
+      .catch(() => setStatus(null));
+  };
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  // Poll while a download runs; toast once when it finishes.
+  useEffect(() => {
+    if (status?.download_running) {
+      wasDownloading.current = true;
+      const t = setInterval(
+        () => protonStatus().then(setStatus).catch(() => {}),
+        2000,
+      );
+      return () => clearInterval(t);
+    }
+    if (wasDownloading.current && status) {
+      wasDownloading.current = false;
+      toaster.toast({
+        title: "PartyDeck",
+        body: status.download_error
+          ? `Proton download failed: ${status.download_error}`
+          : "Proton runtime ready.",
+      });
+      listProtonRunners()
+        .then(setRunners)
+        .catch(() => {});
+    }
+    return undefined;
+  }, [status?.download_running]);
+
+  const onDownload = async () => {
+    setError(null);
+    try {
+      await downloadProton(status?.ge_update_available === true);
+      const s = await protonStatus();
+      setStatus(s);
+    } catch (e) {
+      setError(String(e));
     }
   };
 
@@ -60,25 +110,73 @@ export const ProtonPage: FC = () => {
     );
   }
 
+  // Blank config gets pinned backend-side on the first status call; until the
+  // next config fetch the pinned value only exists in `status`.
+  const selected = config.proton_version || status?.configured || AUTO_GE;
+
+  const options = [
+    ...(runners ?? []).map((r) => ({
+      data: r.value,
+      label: r.kind === "valve" ? `${r.name} (Valve)` : r.name,
+    })),
+    { data: AUTO_GE, label: "Always latest GE (auto-download at launch)" },
+  ];
+  if (selected && !options.some((o) => o.data === selected)) {
+    options.push({ data: selected, label: `Current: ${selected}` });
+  }
+
+  const downloading = status?.download_running === true;
+  const updateAvailable = status?.ge_update_available === true;
+  const needsDownload = status?.needs_download === true;
+  const canDownload = !downloading && (needsDownload || updateAvailable);
+
+  const statusLines: string[] = [];
+  if (status) {
+    statusLines.push(
+      `steamrt3 runtime: ${status.runtime_installed ? "installed" : "not downloaded"}`,
+    );
+    statusLines.push(
+      `Runner ${status.configured || AUTO_GE}: ${status.runner_installed ? "installed" : "not downloaded"}`,
+    );
+    if (updateAvailable && status.latest_ge) {
+      statusLines.push(`${status.latest_ge} is available`);
+    }
+    if (status.ge_update_available === null) {
+      statusLines.push("(update check unavailable — offline?)");
+    }
+  }
+
   return (
     <DialogBody>
-      {error && (
+      {(error || status?.download_error) && (
         <DialogControlsSection>
-          <Field description={<span style={{ color: "#ff6b6b" }}>{error}</span>} />
+          <Field
+            description={
+              <span style={{ color: "#ff6b6b" }}>
+                {error || status?.download_error}
+              </span>
+            }
+          />
         </DialogControlsSection>
       )}
       <DialogControlsSection>
         <DialogControlsSectionHeader>Proton</DialogControlsSectionHeader>
         <Field
-          label="Proton version"
-          description="A Proton version name (e.g. GE-Proton for the latest Proton-GE) or an absolute path. Leave blank for GE-Proton."
+          label="Proton runner"
+          description="Runners already on this Deck (compatibility tools and Valve Protons). PartyDeck pins a specific version so launches never download unexpectedly."
           childrenContainerWidth="fixed"
         >
-          <TextField
-            value={version}
-            disabled={busy}
-            onChange={(e) => setVersion(e.target.value)}
-            onBlur={commitVersion}
+          <Dropdown
+            rgOptions={options}
+            selectedOption={selected}
+            disabled={busy || runners === null}
+            onChange={(opt) => {
+              if (opt.data !== config.proton_version) {
+                patch("proton_version", opt.data).then(() =>
+                  protonStatus().then(setStatus).catch(() => {}),
+                );
+              }
+            }}
           />
         </Field>
         <ToggleField
@@ -95,6 +193,44 @@ export const ProtonPage: FC = () => {
           disabled={busy}
           onChange={(v) => patch("proton_wow64", v)}
         />
+      </DialogControlsSection>
+      <DialogControlsSection>
+        <DialogControlsSectionHeader>
+          Runtime &amp; Downloads
+        </DialogControlsSectionHeader>
+        <Field
+          label="Status"
+          description={
+            status === null ? "Checking…" : statusLines.join(" · ")
+          }
+          childrenContainerWidth="fixed"
+        >
+          <DialogButton
+            disabled={!canDownload}
+            onClick={onDownload}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "0.5rem",
+            }}
+          >
+            {downloading ? (
+              <>
+                <Spinner width={16} height={16} /> Downloading…
+              </>
+            ) : (
+              <>
+                <FaDownload size={16} />{" "}
+                {needsDownload
+                  ? "Download"
+                  : updateAvailable
+                    ? "Update GE"
+                    : "Up to date"}
+              </>
+            )}
+          </DialogButton>
+        </Field>
       </DialogControlsSection>
       <DialogControlsSection>
         <DialogControlsSectionHeader>Maintenance</DialogControlsSectionHeader>

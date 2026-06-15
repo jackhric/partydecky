@@ -25,12 +25,23 @@ const BUTTON_R1 = 31;
 const ARMING_DELAY_MS = 500;
 // Exported so PlayerCell's hold indicator animates over the same duration.
 export const LEAVE_HOLD_MS = 250;
+const EXIT_HOLD_MS = 2000;
+const EXIT_TICK_MS = 100;
+// A tick gap this large means the CEF context was throttled/suspended mid-hold;
+// cancel rather than fire a stale exit on resume.
+const STALE_TICK_MS = 500;
 
 // Lobby state machine: press A on an unjoined controller to add a player cell,
 // HOLD B on a joined controller (~0.5s) to remove it — a tap won't leave, so an
 // accidental B doesn't kick a player. Profiles are auto-assigned in order from
 // the available pool and can be changed per cell afterward.
-export function usePlayerLobby(profiles: string[]) {
+//
+// Exiting the page is also handled here: holding B for EXIT_HOLD_MS fires
+// onExit. It rides this same SteamClient.Input stream (not Focusable gamepad
+// events) on purpose — the stream delivers every physical press/release per
+// controller regardless of where Steam's UI focus is, so a focus move mid-hold
+// can't strand a running timer (the old useHoldToExit bug).
+export function usePlayerLobby(profiles: string[], onExit: () => void) {
   const [players, setPlayers] = useState<Player[]>([]);
 
   // Steam's XInput slot assignment collapses after sleep/wake (a known Steam
@@ -58,6 +69,9 @@ export function usePlayerLobby(profiles: string[]) {
   // sees the current pool without re-subscribing on every profile change.
   const profilesRef = useRef(profiles);
   profilesRef.current = profiles;
+
+  const onExitRef = useRef(onExit);
+  onExitRef.current = onExit;
 
   // The SteamClient.Input stream fires regardless of UI focus, so we gate it
   // ourselves: ignore input whenever the Quick Access or Steam menu overlay is
@@ -105,16 +119,68 @@ export function usePlayerLobby(profiles: string[]) {
     setLeavingControllers((prev) => (prev.size > 0 ? new Set() : prev));
   }, []);
 
+  // Exit hold: per-controller B press timestamps plus one shared ticker that
+  // only runs while at least one hold is active. Keyed by controllerIndex so
+  // one pad's release can't cancel another pad's hold.
+  const exitHoldsRef = useRef(new Map<number, number>());
+  const exitTickerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastTickAtRef = useRef(0);
+  // Ms left until the exit fires, or null when no B is held. Drives the
+  // "Exiting in X.X..." countdown on the page.
+  const [exitRemainingMs, setExitRemainingMs] = useState<number | null>(null);
+
+  const cancelExitHolds = useCallback(() => {
+    exitHoldsRef.current.clear();
+    if (exitTickerRef.current !== null) {
+      clearInterval(exitTickerRef.current);
+      exitTickerRef.current = null;
+    }
+    setExitRemainingMs(null);
+  }, []);
+
+  const startExitHold = useCallback(
+    (controllerIndex: number) => {
+      const holds = exitHoldsRef.current;
+      if (holds.has(controllerIndex)) return;
+      holds.set(controllerIndex, Date.now());
+      setExitRemainingMs((prev) => prev ?? EXIT_HOLD_MS);
+      if (exitTickerRef.current !== null) return;
+      lastTickAtRef.current = Date.now();
+      exitTickerRef.current = setInterval(() => {
+        const now = Date.now();
+        if (now - lastTickAtRef.current > STALE_TICK_MS) {
+          cancelExitHolds();
+          return;
+        }
+        lastTickAtRef.current = now;
+        let oldest = now;
+        exitHoldsRef.current.forEach((at) => {
+          if (at < oldest) oldest = at;
+        });
+        const remaining = EXIT_HOLD_MS - (now - oldest);
+        if (remaining <= 0) {
+          cancelExitHolds();
+          onExitRef.current();
+        } else {
+          setExitRemainingMs(remaining);
+        }
+      }, EXIT_TICK_MS);
+    },
+    [cancelExitHolds],
+  );
+
   useEffect(() => {
     overlayOpenRef.current = overlayOpen;
     if (!overlayOpen) {
       // When an overlay closes, re-arm the grace period before joins resume.
       armedAtRef.current = Date.now() + ARMING_DELAY_MS;
     } else {
-      // An overlay stealing focus mid-hold should not complete a leave.
+      // An overlay stealing focus mid-hold should not complete a leave or an
+      // exit (the B-up may never reach us while the overlay is open).
       cancelAllLeaves();
+      cancelExitHolds();
     }
-  }, [overlayOpen, cancelAllLeaves]);
+  }, [overlayOpen, cancelAllLeaves, cancelExitHolds]);
 
   useEffect(() => {
     armedAtRef.current = Date.now() + ARMING_DELAY_MS;
@@ -125,6 +191,9 @@ export function usePlayerLobby(profiles: string[]) {
       if (button === BUTTON_B) {
         if (isDown) {
           if (Date.now() < armedAtRef.current) return;
+          // Any controller's held B counts toward the page exit; a joined
+          // controller's hold ALSO runs its (shorter) leave timer below.
+          startExitHold(controllerIndex);
           if (leaveTimersRef.current.has(controllerIndex)) return;
           const timer = setTimeout(() => {
             leaveTimersRef.current.delete(controllerIndex);
@@ -141,6 +210,8 @@ export function usePlayerLobby(profiles: string[]) {
           setLeavingControllers((prev) => new Set(prev).add(controllerIndex));
         } else {
           cancelLeave(controllerIndex); // released before the hold completed
+          exitHoldsRef.current.delete(controllerIndex);
+          if (exitHoldsRef.current.size === 0) cancelExitHolds();
         }
         return;
       }
@@ -202,9 +273,10 @@ export function usePlayerLobby(profiles: string[]) {
     });
     return () => {
       cancelAllLeaves();
+      cancelExitHolds();
       unregister();
     };
-  }, [cancelLeave, cancelAllLeaves]);
+  }, [cancelLeave, cancelAllLeaves, cancelExitHolds, startExitHold]);
 
   const setProfile = useCallback((controllerIndex: number, profile: string) => {
     setPlayers((prev) =>
@@ -221,5 +293,12 @@ export function usePlayerLobby(profiles: string[]) {
     if (controllerOrderBroken) setPlayers([]);
   }, [controllerOrderBroken]);
 
-  return { players, setProfile, controllerOrderBroken, leavingControllers };
+  return {
+    players,
+    setProfile,
+    controllerOrderBroken,
+    leavingControllers,
+    exitRemainingMs,
+    cancelExitHolds,
+  };
 }

@@ -74,6 +74,40 @@ class Plugin:
         self._setup_task = self.loop.create_task(_run())
         return {"started": True}
 
+    # ── Proton / umu management ──────────────────────────────────────
+    # Same background-task shape as setup: the prefetch can download >1GB, so
+    # download_proton returns immediately and proton_status reports progress.
+
+    async def list_proton_runners(self) -> list:
+        return await self.loop.run_in_executor(None, partydeck.list_proton_runners)
+
+    async def proton_status(self) -> dict:
+        status = await self.loop.run_in_executor(None, partydeck.proton_status)
+        task = getattr(self, "_proton_task", None)
+        status["download_running"] = task is not None and not task.done()
+        status["download_error"] = getattr(self, "_proton_error", None)
+        return status
+
+    async def download_proton(self, update_ge: bool = False) -> dict:
+        existing = getattr(self, "_proton_task", None)
+        if existing is not None and not existing.done():
+            return {"started": False, "reason": "already running"}
+
+        self._proton_error = None
+
+        async def _run() -> None:
+            try:
+                await self.loop.run_in_executor(
+                    None, partydeck.prefetch_proton, update_ge
+                )
+                decky.logger.info("Proton prefetch finished")
+            except Exception as e:  # noqa: BLE001 — surface to the frontend via status
+                decky.logger.exception("Proton prefetch failed")
+                self._proton_error = str(e)
+
+        self._proton_task = self.loop.create_task(_run())
+        return {"started": True}
+
     async def prepare_partydeck(
         self, appid: int = 0, handler: str = "", players: list = None
     ) -> dict:
@@ -93,7 +127,15 @@ class Plugin:
             raise RuntimeError("PartyDeck not installed yet — run setup first")
         # Cheap: ensures handlers/settings/launcher exist, returns paths.
         return await self.loop.run_in_executor(
-            None, partydeck.get_launcher_info, handler, players
+            None, partydeck.get_launcher_info, handler, players, appid
+        )
+
+    async def list_run_logs(self) -> list:
+        return await self.loop.run_in_executor(None, partydeck.list_run_logs)
+
+    async def upload_run_log(self, filename: str) -> dict:
+        return await self.loop.run_in_executor(
+            None, partydeck.upload_run_log, filename
         )
 
     async def get_shortcut_artwork(self) -> dict:

@@ -16,8 +16,8 @@ import { LEAVE_HOLD_MS, type Player } from "./usePlayerLobby";
 const B_BUTTON_GLYPH =
   "https://steamloopback.host/steaminputglyphs/shared_button_b.svg";
 
-// GamepadButton.OK from @decky/ui's FooterLegend enum (the A button), same
-// inlining rationale as GAMEPAD_CANCEL in useHoldToExit.
+// GamepadButton.OK from @decky/ui's FooterLegend enum (the A button), inlined
+// to avoid a deep-import of the enum from @decky/ui/dist internals.
 const GAMEPAD_OK = 1;
 const HOLD_OPEN_MS = 500;
 

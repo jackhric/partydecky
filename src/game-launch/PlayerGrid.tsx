@@ -73,7 +73,13 @@ export const PlayerGrid: FC<Props> = ({
 
   if (players.length === 0) {
     return (
-      <div
+      // Must be focusable itself (onActivate, no focusable children): if
+      // gamepad focus ever sits outside the page, a B press bypasses the
+      // page's onCancel shield and Steam's default instant back fires.
+      <Focusable
+        onActivate={() => {}}
+        noFocusRing
+        preferredFocus
         style={{
           flex: 1,
           display: "flex",
@@ -93,7 +99,7 @@ export const PlayerGrid: FC<Props> = ({
             ? `Exiting in ${(exitRemainingMs / 1000).toFixed(1)}...`
             : "Hold B to exit"}
         </div>
-      </div>
+      </Focusable>
     );
   }
 

@@ -24,13 +24,24 @@ import base64
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import tarfile
+import time
+import urllib.error
+import urllib.parse
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 import decky
+
+# Decky Loader is a PyInstaller bundle whose embedded OpenSSL can't find
+# SteamOS's CA store, so bare urlopen() fails CERTIFICATE_VERIFY_FAILED.
+# Every HTTPS call must pass the loader's certifi-backed context (the
+# standard pattern across plugins, e.g. decky-steamgriddb).
+from helpers import get_ssl_context  # type: ignore[import-not-found]
 
 # ── Upstream binary bundle (pinned) ──────────────────────────────────
 # v0.8.5 "Steamed Hams" — verified to run on the Deck (glibc <= 2.39).
@@ -92,6 +103,21 @@ def _party_data_dir() -> Path:
     if xdg:
         return Path(xdg) / "partydeck"
     return _home() / ".local/share/partydeck"
+
+
+def _log_dir() -> Path:
+    """Decky's per-plugin log dir (e.g. ~/homebrew/logs/PartyDeck). Unlike the
+    runtime dir, nothing ever wipes this, so run history is safe here."""
+    base = os.environ.get("DECKY_PLUGIN_LOG_DIR")
+    if base:
+        return Path(base)
+    return _home() / ".local/share/partydeck-plugin/logs"
+
+
+def _runs_dir() -> Path:
+    """Per-session run logs. A subfolder so they never mix with decky's own
+    backend logs at the top level of the log dir."""
+    return _log_dir() / "runs"
 
 
 def _binary_path() -> Path:
@@ -181,6 +207,215 @@ def erase_prefixes() -> None:
     _run_partydeck("config", "erase-prefixes")
 
 
+# ── Proton / umu management ──────────────────────────────────────────
+# umu (bundled at bin/umu-run) resolves a bare PROTONPATH name against
+# ~/.local/share/umu/compatibilitytools then Steam's compatibilitytools.d with
+# no network; "GE-Proton" means "latest GE" and hits GitHub at every launch.
+# These helpers give the frontend visibility into that state so downloads
+# happen via an explicit button instead of behind a black screen mid-launch.
+
+
+def _compat_dirs() -> list[Path]:
+    return [
+        _home() / ".local/share/umu/compatibilitytools",
+        _home() / ".local/share/Steam/compatibilitytools.d",
+    ]
+
+
+def _steamrt3_dir() -> Path:
+    return _home() / ".local/share/umu/steamrt3"
+
+
+def _is_proton_runner(d: Path) -> bool:
+    # Filters non-runner compat tools (e.g. SteamTinkerLaunch).
+    return d.is_dir() and (d / "proton").is_file()
+
+
+def _version_key(name: str) -> list:
+    # Natural sort so GE-Proton10-34 > GE-Proton9-20. Tagged tuples keep the
+    # elements mutually comparable (never str-vs-int).
+    return [(1, int(t), "") if t.isdigit() else (0, 0, t) for t in re.split(r"(\d+)", name)]
+
+
+def list_proton_runners() -> list[dict]:
+    """Runners umu can use: compat-tools dirs (bare-name lookup, offline) and
+    Valve Protons from steamapps/common (absolute path; not name-resolvable)."""
+    runners: dict[str, dict] = {}
+    # Steam's dir scanned last so it wins a name collision (umu prefers it too).
+    for base in _compat_dirs():
+        if base.is_dir():
+            for d in base.iterdir():
+                if _is_proton_runner(d):
+                    runners[d.name] = {"name": d.name, "value": d.name, "kind": "custom"}
+    common = _home() / ".local/share/Steam/steamapps/common"
+    if common.is_dir():
+        for d in common.glob("Proton*"):
+            if _is_proton_runner(d) and d.name not in runners:
+                runners[d.name] = {"name": d.name, "value": str(d), "kind": "valve"}
+    # GE runners first (newest on top — it's the default pin), other custom
+    # tools after, also newest-first.
+    custom = sorted(
+        (r for r in runners.values() if r["kind"] == "custom"),
+        key=lambda r: (r["name"].startswith("GE-Proton"), _version_key(r["name"])),
+        reverse=True,
+    )
+    valve = sorted(
+        (r for r in runners.values() if r["kind"] == "valve"),
+        key=lambda r: r["name"],
+    )
+    return custom + valve
+
+
+def _installed_ge_names() -> list[str]:
+    names = {
+        d.name
+        for base in _compat_dirs()
+        if base.is_dir()
+        for d in base.glob("GE-Proton*")
+        if _is_proton_runner(d)
+    }
+    return sorted(names, key=_version_key, reverse=True)
+
+
+_GE_LATEST_CACHE: tuple[float, str | None] | None = None
+_GE_CACHE_TTL = 15 * 60
+
+
+def _ge_latest() -> str | None:
+    """Latest GE-Proton release tag from GitHub (== its install dir name), or
+    None when the check fails. Cached so lobby/page polls don't hammer the API."""
+    global _GE_LATEST_CACHE
+    now = time.monotonic()
+    if _GE_LATEST_CACHE is not None and now - _GE_LATEST_CACHE[0] < _GE_CACHE_TTL:
+        return _GE_LATEST_CACHE[1]
+    tag = None
+    try:
+        req = urllib.request.Request(
+            "https://api.github.com/repos/GloriousEggroll/proton-ge-custom/releases/latest",
+            headers={"User-Agent": _PASTE_USER_AGENT},
+        )
+        with urllib.request.urlopen(  # noqa: S310 (fixed https URL)
+            req, timeout=5, context=get_ssl_context()
+        ) as resp:
+            tag = json.load(resp).get("tag_name") or None
+    except Exception as e:
+        decky.logger.warning("GE latest-release check failed: %s", e)
+    _GE_LATEST_CACHE = (now, tag)
+    return tag
+
+
+def _runtime_installed() -> bool:
+    rt = _steamrt3_dir()
+    return (rt / "VERSIONS.txt").is_file() and any(rt.glob("sniper_platform_*"))
+
+
+def _runner_installed(configured: str, mode: str, latest_ge: str | None) -> bool:
+    if mode == "path":
+        return _is_proton_runner(Path(configured))
+    if mode == "named":
+        return any(_is_proton_runner(base / configured) for base in _compat_dirs())
+    # auto-ge: umu downloads unless the *latest* release is already installed.
+    if latest_ge is not None:
+        return latest_ge in _installed_ge_names()
+    return bool(_installed_ge_names())
+
+
+def proton_status() -> dict:
+    """Filesystem + best-effort network view of what a win-handler launch needs.
+    Never raises (the lobby gate polls this). Also applies the default-pin
+    policy: a blank proton_version is pinned to the newest installed GE so
+    launches stay offline-deterministic."""
+    configured = ""
+    try:
+        cfg = get_config()
+        configured = cfg.get("proton_version", "") or ""
+        ge_names = _installed_ge_names()
+        if not configured and ge_names:
+            cfg["proton_version"] = ge_names[0]
+            set_config(cfg)
+            configured = ge_names[0]
+            decky.logger.info("Pinned proton_version to %s", configured)
+    except Exception as e:
+        decky.logger.warning("proton_status: config unavailable: %s", e)
+
+    if configured in ("", "GE-Proton", "GE-Latest"):
+        mode = "auto-ge"
+    elif configured.startswith("/"):
+        mode = "path"
+    else:
+        mode = "named"
+
+    latest_ge = _ge_latest()
+    runner_installed = _runner_installed(configured, mode, latest_ge)
+    runtime_installed = _runtime_installed()
+    ge_update = None if latest_ge is None else latest_ge not in _installed_ge_names()
+    return {
+        "configured": configured,
+        "mode": mode,
+        "runner_installed": runner_installed,
+        "runtime_installed": runtime_installed,
+        "latest_ge": latest_ge,
+        "ge_update_available": ge_update,
+        # Offline (ge_update None) never gates a launch.
+        "needs_download": not runner_installed
+        or not runtime_installed
+        or (mode == "auto-ge" and ge_update is True),
+    }
+
+
+def prefetch_proton(update_ge: bool = False) -> None:
+    """Download whatever the next launch would: the steamrt3 runtime and the
+    configured runner (latest GE when update_ge or in auto mode). Runs umu
+    headlessly against a no-op exe — all downloads happen before exec."""
+    status = proton_status()
+    protonpath = (
+        "GE-Proton" if update_ge or status["mode"] == "auto-ge" else status["configured"]
+    )
+    umu_run = _runtime_dir() / "bin" / "umu-run"
+    if not umu_run.is_file():
+        raise RuntimeError("PartyDeck not installed yet — run setup first")
+
+    pfx = _runtime_dir() / "prefetch-pfx"
+    env = {
+        **os.environ,
+        "HOME": str(_home()),
+        "PROTONPATH": protonpath,
+        "PROTON_VERB": "run",
+        "WINEPREFIX": str(pfx),
+    }
+    decky.logger.info("Prefetching Proton (PROTONPATH=%s)", protonpath)
+    try:
+        proc = subprocess.run(  # noqa: S603 (fixed binary, no shell)
+            [str(umu_run), "/bin/true"],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=1800,
+            check=False,
+        )
+        decky.logger.info("umu prefetch rc=%s\n%s", proc.returncode, proc.stderr[-2000:])
+    finally:
+        shutil.rmtree(pfx, ignore_errors=True)
+
+    # umu may exit nonzero running the no-op exe; judge by what's on disk.
+    after = proton_status()
+    if not after["runtime_installed"] or not after["runner_installed"]:
+        raise RuntimeError(f"Proton download incomplete: {proc.stderr.strip()[-500:]}")
+
+    # Keep the pin policy: a fresh latest-GE download repins a GE pin (or a
+    # blank config, which proton_status() above already pinned if possible).
+    if update_ge and status["configured"].startswith("GE-Proton"):
+        try:
+            cfg = get_config()
+            ge_names = _installed_ge_names()
+            if ge_names and cfg.get("proton_version") != ge_names[0]:
+                cfg["proton_version"] = ge_names[0]
+                set_config(cfg)
+                decky.logger.info("Repinned proton_version to %s", ge_names[0])
+        except Exception as e:
+            decky.logger.warning("repin after update failed: %s", e)
+
+
 def _sha256(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
@@ -204,7 +439,10 @@ def install_binary(force: bool = False) -> Path:
     tarball = runtime.parent / f"PartyDeck-{PARTYDECK_VERSION}.tar.gz"
 
     decky.logger.info("Downloading PartyDeck %s from %s", PARTYDECK_VERSION, PARTYDECK_URL)
-    urllib.request.urlretrieve(PARTYDECK_URL, tarball)  # noqa: S310 (pinned URL)
+    with urllib.request.urlopen(  # noqa: S310 (pinned URL)
+        PARTYDECK_URL, timeout=30, context=get_ssl_context()
+    ) as resp, tarball.open("wb") as out:
+        shutil.copyfileobj(resp, out)
 
     actual_size = tarball.stat().st_size
     if actual_size != PARTYDECK_SIZE:
@@ -311,7 +549,9 @@ LAUNCHER_NAME = "partydeck-launch.sh"
 PLAYERS_NAME = "launch-players.json"
 
 
-def write_launcher_script(handler: str = "", players: list | None = None) -> Path:
+def write_launcher_script(
+    handler: str = "", players: list | None = None, appid: int = 0
+) -> Path:
     """Write the wrapper script Steam will execute, and return its path.
 
     With a handler + players, the script launches that game headlessly, binding
@@ -319,6 +559,9 @@ def write_launcher_script(handler: str = "", players: list | None = None) -> Pat
     a sidecar JSON file (passed by path) rather than through Steam launch options
     — the `--kwin` re-exec re-quotes its forwarded args and would mangle inline
     JSON. Without a handler, it falls back to the plain GUI (upstream behaviour).
+
+    `appid` is the Steam app the launch was prepared for; it (and the handler)
+    get baked into the per-run log filename so the Logs page can attribute runs.
     """
     import shlex
 
@@ -342,46 +585,159 @@ def write_launcher_script(handler: str = "", players: list | None = None) -> Pat
         # then exec the GUI inside a nested KWin session.
         invocation = f'"{binary}" --kwin --fullscreen'
 
-    # Wrapper-level tracing (wrapper.log) is separate from the binary's own
-    # log.txt: the --kwin re-exec detaches the nested session, so its output can
-    # escape log.txt. The wrapper trace + exit code always survive here, telling
-    # us whether Steam ran the script and how the outer process exited.
-    log = f"{runtime}/log.txt"
-    wrapper = f"{runtime}/wrapper.log"
+    # One per-session log file, wrapper trace and binary output merged. The
+    # --kwin re-exec detaches the nested session, so binary output can escape
+    # the file — but the wrapper trace + exit code always survive, telling us
+    # whether Steam ran the script and how the outer process exited.
+    safe_handler = re.sub(r"[^A-Za-z0-9._-]", "_", handler) if handler else ""
+    suffix = (f"_SteamID-{appid}" if appid else "") + (
+        f"_Handler-{safe_handler}" if safe_handler else ""
+    )
     script.write_text(
         "#!/bin/bash\n"
-        f'exec > "{wrapper}" 2>&1\n'
+        f'RUNS_DIR="{_runs_dir()}"\n'
+        'mkdir -p "$RUNS_DIR"\n'
+        "# Prune BEFORE creating this run's log: keep the 19 newest so this run\n"
+        "# makes 20. In-script (not in Python) so it fires even when the shortcut\n"
+        "# is relaunched without prepare; at start (not exit) so it survives\n"
+        "# Steam killing the wrapper mid-run.\n"
+        'ls -1t "$RUNS_DIR"/run-*.log 2>/dev/null | tail -n +20 | xargs -r rm -f --\n'
+        "# Timestamp at RUN time, not prepare time: the Steam shortcut can be\n"
+        "# relaunched from the library without rewriting this script.\n"
+        f'RUN_LOG="$RUNS_DIR/run-$(date +%Y-%m-%d_%H-%M-%S){suffix}.log"\n'
+        'ln -sfn "$RUN_LOG" "$RUNS_DIR/latest.log"\n'
+        '# >> so a same-second relaunch appends instead of truncating.\n'
+        'exec >> "$RUN_LOG" 2>&1\n'
         "set -x\n"
-        f'echo "[wrapper] launcher start: $(date)"\n'
+        'echo "[wrapper] launcher start: $(date)"\n'
         f'cd "{runtime}" || exit 1\n'
-        f'{invocation} > "{log}" 2>&1\n'
-        f'rc=$?\n'
-        f'echo "[wrapper] partydeck exited rc=$rc: $(date)"\n'
-        f"exit $rc\n"
+        f"{invocation}\n"
+        "rc=$?\n"
+        'echo "[wrapper] partydeck exited rc=$rc: $(date)"\n'
+        "exit $rc\n"
     )
     script.chmod(0o755)
     decky.logger.info("Wrote launcher script (handler=%r) -> %s", handler, script)
     return script
 
 
-def ensure_runtime_files(handler: str = "", players: list | None = None) -> None:
+def ensure_runtime_files(
+    handler: str = "", players: list | None = None, appid: int = 0
+) -> None:
     """Cheap, fast prerequisites for a launch (NO binary download): handlers,
     settings, and the launcher script. Safe to call right before launching."""
     install_bundled_handlers()
     write_default_settings()
-    write_launcher_script(handler, players)
+    write_launcher_script(handler, players, appid)
 
 
-def get_launcher_info(handler: str = "", players: list | None = None) -> dict:
+def get_launcher_info(
+    handler: str = "", players: list | None = None, appid: int = 0
+) -> dict:
     """Ensure the cheap runtime files exist (rewriting the launcher for this
     handler/players selection), then return the path + working dir the frontend
     needs to register the Steam shortcut."""
-    ensure_runtime_files(handler, players)
+    ensure_runtime_files(handler, players, appid)
     return {
         "exe": str(_runtime_dir() / LAUNCHER_NAME),
         "directory": str(_runtime_dir()),
-        "log": str(_runtime_dir() / "log.txt"),
+        "log_dir": str(_runs_dir()),
     }
+
+
+# Filename contract with the launcher script's RUN_LOG line above.
+_RUN_LOG_RE = re.compile(
+    r"^run-(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})"
+    r"(?:_SteamID-(\d+))?(?:_Handler-([A-Za-z0-9._-]+))?\.log$"
+)
+
+
+def list_run_logs(limit: int = 10) -> list[dict]:
+    """Newest-first per-session run logs. timestamp = session START (epoch
+    seconds), parsed from the filename the launcher script wrote; falls back
+    to mtime for anything unparseable."""
+    runs = _runs_dir()
+    if not runs.is_dir():
+        return []
+    entries: list[dict] = []
+    for path in runs.glob("run-*.log"):
+        if not path.is_file() or path.is_symlink():
+            continue
+        stat = path.stat()
+        m = _RUN_LOG_RE.match(path.name)
+        ts = stat.st_mtime
+        appid = None
+        handler = None
+        if m:
+            try:
+                ts = datetime.strptime(m.group(1), "%Y-%m-%d_%H-%M-%S").timestamp()
+            except ValueError:
+                pass
+            appid = int(m.group(2)) if m.group(2) else None
+            handler = m.group(3)
+        entries.append(
+            {
+                "filename": path.name,
+                "timestamp": int(ts),
+                "size_bytes": stat.st_size,
+                "appid": appid,
+                "handler": handler,
+            }
+        )
+    entries.sort(key=lambda e: e["timestamp"], reverse=True)
+    return entries[:limit]
+
+
+# dpaste.com caps pastes at 1MB (ToS); keep the TAIL when over (the end of a
+# log — crash + exit code — is the part worth reading).
+_PASTE_MAX_BYTES = 950_000
+_PASTE_EXPIRY_DAYS = 30
+# dpaste's ToS requires a real User-Agent on automated requests.
+_PASTE_USER_AGENT = "PartyDeck-Decky-Plugin (https://github.com/wunnr/partydeck)"
+
+
+def upload_run_log(filename: str) -> dict:
+    """Upload one run log to dpaste.com (anonymous pastes are unlisted; logs
+    can contain usernames/paths — never public), expiring after a month.
+    Returns {"url": ...}; raises with dpaste's error text on failure."""
+    if not _RUN_LOG_RE.match(filename):
+        raise RuntimeError(f"not a run log: {filename!r}")
+    path = _runs_dir() / filename
+    if not path.is_file():
+        raise RuntimeError(f"log not found: {filename}")
+
+    data = path.read_bytes()
+    truncated = len(data) > _PASTE_MAX_BYTES
+    if truncated:
+        data = data[-_PASTE_MAX_BYTES:]
+    content = data.decode("utf-8", errors="replace")
+    if truncated:
+        content = f"[truncated: showing last {_PASTE_MAX_BYTES} bytes]\n" + content
+
+    body = urllib.parse.urlencode(
+        {
+            "content": content,
+            "title": filename,
+            "expiry_days": str(_PASTE_EXPIRY_DAYS),
+        }
+    ).encode()
+    req = urllib.request.Request(
+        "https://dpaste.com/api/v2/",
+        data=body,
+        headers={"User-Agent": _PASTE_USER_AGENT},
+    )
+    try:
+        with urllib.request.urlopen(  # noqa: S310 (fixed https URL)
+            req, timeout=30, context=get_ssl_context()
+        ) as resp:
+            text = resp.read().decode("utf-8", errors="replace").strip()
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="replace").strip()[:200]
+        raise RuntimeError(f"dpaste: HTTP {e.code} {detail}") from e
+    if not text.startswith("https://dpaste.com/"):
+        raise RuntimeError(f"dpaste: unexpected response: {text[:200]}")
+    decky.logger.info("Uploaded %s -> %s", filename, text)
+    return {"url": text}
 
 
 def get_shortcut_artwork() -> dict:

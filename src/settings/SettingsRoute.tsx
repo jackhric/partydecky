@@ -1,10 +1,11 @@
 import { SidebarNavigation } from "@decky/ui";
 import { routerHook } from "@decky/api";
 import { FC } from "react";
-import { FaCog, FaUser, FaWindows } from "react-icons/fa";
+import { FaCog, FaFileAlt, FaUser, FaWindows } from "react-icons/fa";
 import { ProfilesPage } from "./ProfilesPage";
 import { GeneralPage } from "./GeneralPage";
 import { ProtonPage } from "./ProtonPage";
+import { LogsPage } from "./LogsPage";
 import { SETTINGS_ROUTE } from "../lib/routes";
 
 const SettingsRouter: FC = () => (
@@ -30,6 +31,16 @@ const SettingsRouter: FC = () => (
         icon: <FaWindows />,
         content: <ProtonPage />,
         route: `${SETTINGS_ROUTE}/proton`,
+        visible: true,
+      },
+      "separator",
+      {
+        title: "Logs",
+        icon: <FaFileAlt />,
+        content: <LogsPage />,
+        route: `${SETTINGS_ROUTE}/logs`,
+        // visible is REQUIRED on every real page — omitting it misaligns the
+        // sidebar's DPAD focus indices past the separators.
         visible: true,
       },
     ]}
