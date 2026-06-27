@@ -15,6 +15,7 @@ import {
 } from "./shortcut/ShortcutRedirectPatch";
 import { registerGameSettingsRoute } from "./game-launch/GameSettingsRoute";
 import { registerSettingsRoute } from "./settings/SettingsRoute";
+import { registerAgentControl } from "./lib/agentControl";
 import { SETTINGS_ROUTE } from "./lib/routes";
 
 function Content() {
@@ -49,6 +50,7 @@ export default definePlugin(() => {
   const unregisterSettingsRoute = registerSettingsRoute();
   const gameButtonPatch = patchGameButton();
   const shortcutRedirectPatch = patchShortcutRedirect();
+  const unregisterAgentControl = registerAgentControl();
 
   return {
     name: "PartyDeck",
@@ -60,6 +62,7 @@ export default definePlugin(() => {
       unpatchShortcutRedirect(shortcutRedirectPatch);
       unregisterGameSettingsRoute();
       unregisterSettingsRoute();
+      unregisterAgentControl();
     },
   };
 });

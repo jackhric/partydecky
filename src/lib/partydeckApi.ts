@@ -176,3 +176,31 @@ export interface ShortcutArtwork {
 export const getShortcutArtwork = callable<[], ShortcutArtwork>(
   "get_shortcut_artwork",
 );
+
+// Autonomous session lifecycle — agentPrepareLaunch emits the agent_launch
+// event handled by lib/agentControl.ts.
+
+export interface AgentRunStatus {
+  exists: boolean;
+  filename?: string;
+  mtime?: number;
+  crashed?: boolean;
+  running?: boolean;
+  tail?: string;
+  timed_out?: boolean;
+}
+
+export const agentPrepareLaunch = callable<
+  [appid: number, handler: string, players: LaunchPlayer[]],
+  { exe: string; directory: string; launch_requested: boolean }
+>("agent_prepare_launch");
+
+export const agentStopSession = callable<
+  [force: boolean],
+  { killed: Record<string, number[]> }
+>("agent_stop_session");
+
+export const agentWaitForRun = callable<
+  [since_mtime: number, timeout_s: number, tail_lines: number],
+  AgentRunStatus
+>("agent_wait_for_run");

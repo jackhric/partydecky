@@ -23,6 +23,7 @@ def add_plugin_to_path() -> None:
 add_plugin_to_path()
 
 # pylint: disable=wrong-import-position
+from python import agent_control  # noqa: E402
 from python import partydeck  # noqa: E402
 from python.service import greet  # noqa: E402
 from python.timers import schedule_pong  # noqa: E402
@@ -154,6 +155,30 @@ class Plugin:
     async def get_shortcut_artwork(self) -> dict:
         return await self.loop.run_in_executor(
             None, partydeck.get_shortcut_artwork
+        )
+
+    # ── Autonomous session lifecycle (agent_control) ─────────────────
+
+    async def agent_prepare_launch(
+        self, appid: int = 0, handler: str = "", players: list = None
+    ) -> dict:
+        # Emit on the loop, not the executor: decky.emit is a coroutine.
+        payload = await self.loop.run_in_executor(
+            None, agent_control.build_launch_request, appid, handler, players
+        )
+        await decky.emit(agent_control.AGENT_LAUNCH_EVENT, payload)
+        return {**payload, "launch_requested": True}
+
+    async def agent_stop_session(self, force: bool = False) -> dict:
+        return await self.loop.run_in_executor(
+            None, agent_control.stop_session, force
+        )
+
+    async def agent_wait_for_run(
+        self, since_mtime: int = 0, timeout_s: int = 60, tail_lines: int = 120
+    ) -> dict:
+        return await self.loop.run_in_executor(
+            None, agent_control.wait_for_run, since_mtime, timeout_s, tail_lines
         )
 
     # Run in the executor so the subprocess doesn't block the event loop.

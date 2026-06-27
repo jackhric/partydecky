@@ -212,7 +212,10 @@ export async function launchViaShortcut(
     } catch {
       /* non-fatal */
     }
-    await hideShortcut(appId);
+    // Not awaited: hideShortcut polls BIsHidden for up to 3s, which swallowed
+    // the launch when called from the agent_launch event callback. RunGame must
+    // not wait on cosmetics. Already hidden at creation; this just re-asserts.
+    void hideShortcut(appId);
   }
 
   const overview = getOverview(appId);
