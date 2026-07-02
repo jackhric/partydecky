@@ -1,0 +1,92 @@
+{
+  "manifest_version": 1,
+  "plugin": "PartyDeck",
+  "log_sources": {
+    "backend": {
+      "root": "logs/PartyDeck",
+      "glob": "*.log",
+      "latest": "newest_mtime",
+      "description": "Decky backend log. A NEW file is created per FRONTEND load (Steam UI reload / Decky reload), not per plugin_loader restart — the newest file is the live session; no file yet means the frontend hasn't loaded the plugin. First line on a good load: 'PartyDeck backend loaded.'"
+    },
+    "runs": {
+      "root": "logs/PartyDeck/runs",
+      "glob": "run-*.log",
+      "latest": "symlink:latest.log",
+      "description": "Per-launch wrapper log: launcher-script trace (set -x) merged with the binary's outer stdout. The --kwin re-exec detaches the nested session so game output can escape this file — per-instance output lives in the sibling session dir instead. Pruned to 20 by the launcher script."
+    },
+    "sessions": {
+      "root": "logs/PartyDeck/runs",
+      "glob": "run-*/**/*.log",
+      "latest": "newest_mtime",
+      "description": "Structured session dirs created by the PartyDeck binary (via PARTYDECK_SESSION_LOG_DIR): run-<stem>/ sibling of run-<stem>.log with session.json (handler, players, per-instance cmd/env/cwd, exit codes; finished_at null while running or killed externally), handler.json, always-on instance-<n>.log (gamescope>bwrap>umu subtree stdout+stderr), and proton-<n>/ Proton logs only when the debug_game_logs config flag is true. No dir at all = old binary or the run never reached the binary. Pruned to 20."
+    }
+  },
+  "sessions": {
+    "root": "logs/PartyDeck/runs",
+    "dir_glob": "run-*",
+    "meta_file": "session.json",
+    "instance_glob": "instance-*.log",
+    "extra_globs": ["proton-*/*.log"],
+    "correlate": {
+      "runs_source": "runs",
+      "backend_source": "backend"
+    }
+  },
+  "callables": [
+    {
+      "name": "list_handlers",
+      "signature": "list_handlers() -> list[dict]",
+      "description": "Installed game handlers via `partydeck handler list`. A handler's name is the exact string agent_prepare_launch expects. Fails if the binary isn't installed yet (run setup first)."
+    },
+    {
+      "name": "list_profiles",
+      "signature": "list_profiles() -> list[dict]",
+      "description": "Player profiles via `partydeck profile list`. Every player in agent_prepare_launch must reference an existing profile, and no two players may share one (the backend rejects duplicates)."
+    },
+    {
+      "name": "list_run_logs",
+      "signature": "list_run_logs() -> list[dict]",
+      "description": "Newest-first run-log entries (max 10): {filename, timestamp, size_bytes, appid, handler, session_dir}. timestamp is the session START epoch parsed from the filename; session_dir is the sibling run-<stem>/ directory name, or null when the binary never created one."
+    },
+    {
+      "name": "get_config",
+      "signature": "get_config() -> dict",
+      "description": "Full PartyDeck config via `partydeck config show`. Includes debug_game_logs, the flag that enables per-instance Proton/umu logging in session dirs."
+    },
+    {
+      "name": "set_config",
+      "signature": "set_config(config: dict) -> dict",
+      "description": "Apply config via `partydeck config set-json` and return the resulting config. Read-modify-write: call get_config, edit the fields you need (e.g. debug_game_logs: true), and pass the WHOLE dict back."
+    },
+    {
+      "name": "agent_prepare_launch",
+      "signature": "agent_prepare_launch(appid: int = 0, handler: str = '', players: list[{profile: str, xinput: int}] = null) -> {exe, directory, launch_requested}",
+      "description": "Write the launcher script for this handler + player assignment and emit the agent_launch event; the FRONTEND listener performs the actual Steam-shortcut launch. Gotchas: the listener only exists after the frontend bundle has loaded (a plugin_loader restart alone is not enough — 'event agent_launch has no listeners' means reload the Steam UI); capture the runs-dir mtime BEFORE calling this so agent_wait_for_run can't match a stale prior run; players need distinct existing profiles; xinput is the Steam Input pad slot (array order = split order)."
+    },
+    {
+      "name": "agent_wait_for_run",
+      "signature": "agent_wait_for_run(since_mtime: int = 0, timeout_s: int = 60, tail_lines: int = 120) -> dict",
+      "description": "Block until a run log newer than since_mtime finishes (wrapper rc line or crash signature) or timeout, then return {exists, filename, mtime, crashed, running, tail, timed_out}. If the binary created the sibling session dir, it also waits (same deadline) for session.json finished_at, adds session_dir + exit_codes (any non-zero => crashed: true) and appends instance-<n>.log tails to `tail`. Pass the runs-dir mtime captured BEFORE agent_prepare_launch; since_mtime=0 with timeout_s=0 reads the latest run without blocking."
+    },
+    {
+      "name": "agent_stop_session",
+      "signature": "agent_stop_session(force: bool = false) -> {killed: {name: [pids]}}",
+      "description": "Pattern-kill the running session (launcher script, partydeck, gamescope-kbm, gamescopereaper). Default SIGTERM-then-SIGKILL so the launcher can unmount its game-N overlays; force=true SIGKILLs immediately. A stopped session leaves session.json with finished_at null."
+    }
+  ],
+  "deploy": {
+    "plugin_name": "PartyDeck",
+    "backend_log_dir": "logs/PartyDeck",
+    "commands": {
+      "build_frontend": "scripts/build-frontend.sh",
+      "deploy_plugin": "scripts/deploy-plugin.sh",
+      "deploy_backend": {
+        "script": "scripts/deploy-backend.sh",
+        "env": { "BACKEND_SRC": "defaults/python", "BACKEND_DEST": "python" }
+      },
+      "sync_binary": "scripts/sync-partydeck-binary.sh",
+      "restart_decky": "scripts/restart-decky.sh",
+      "check_connection": "scripts/check-connection.sh"
+    }
+  }
+}

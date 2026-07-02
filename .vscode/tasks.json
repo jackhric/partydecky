@@ -1,63 +1,34 @@
 {
   "version": "2.0.0",
+  // Task bodies live in scripts/*.sh (shared with the root workspace tasks and
+  // the local deploy MCP in ../steamdeck-dev-mcp/local_mcp/); tasks just export
+  // the config-derived env and call them.
   "tasks": [
-    // ─────────────────────────── BUILD ───────────────────────────
-    // Compiles src/*.tsx → dist/index.js via rollup. Needed for any
-    // FRONTEND change. (Backend-only main.py edits don't need this.)
     {
       "label": "build",
       "type": "shell",
       "group": { "kind": "build", "isDefault": true },
       "detail": "pnpm build the frontend into dist/",
-      // fnm (your Node version manager) only puts node/pnpm on PATH when a shell
-      // sources ~/.zshrc — which non-interactive VSCode task shells skip. The
-      // `eval "$(fnm env ...)"` prefix initializes fnm inline so pnpm resolves.
-      "command": "eval \"$(fnm env --shell zsh)\" && pnpm install && pnpm run build",
+      "command": "bash scripts/build-frontend.sh",
       "problemMatcher": []
     },
-
-    // ────────────────────────── DEPLOY ───────────────────────────
-    // rsync the plugin files into ~/homebrew/plugins/<pluginname>/ on the
-    // Deck. Uses SSH key auth (${config:deckkey}); no password.
     {
       "label": "deploy",
       "type": "shell",
       "group": "none",
       "detail": "Stage the exact on-device layout locally, then rsync --delete it to the Deck for a clean, from-scratch copy",
-      // ~/homebrew/plugins is root-owned (Decky creates it that way), so rsync
-      // must write as root: --rsync-path='sudo rsync' runs the remote side under
-      // sudo. Requires the passwordless rule from scripts/setup-deck-sudo.sh.
-      //
-      // CLEAN DEPLOY without needing `sudo rm`: we build a local staging dir that
-      // mirrors EXACTLY what should live at the plugin root, then push it with a
-      // single `rsync --delete`. --delete removes anything on-device that isn't in
-      // staging (e.g. a stale defaults/ subdir from an older deploy), so every
-      // deploy is effectively a from-scratch copy — using only the rsync sudo
-      // permission you already have.
-      //
-      // Staging layout = loose files (dist, main.py, plugin.json, package.json)
-      // PLUS the *flattened contents* of defaults/. defaults/ must be flattened
-      // because the Decky store installer flattens it into the plugin root at
-      // install time, but a manual rsync does NOT — without flattening, the
-      // backend lands at defaults/python/ and `from python.service import ...` in
-      // main.py raises ModuleNotFoundError: No module named 'python'.
-      //
-      // One combined --delete pass (vs two separate syncs) is required because
-      // python/ comes from defaults/ while main.py comes from the loose set; a
-      // per-source --delete would wipe whichever tree it wasn't syncing.
-      "command": "stage=\"$(mktemp -d)\" && rsync -a --exclude='__pycache__' --exclude='tests' dist main.py plugin.json package.json defaults/ \"$stage\"/ && rsync -azp --delete --chmod=D0755,F0644 --rsh='ssh -p ${config:deckport} ${config:deckkey}' --rsync-path='sudo rsync' --mkpath --exclude='__pycache__' --exclude='tests' \"$stage\"/ ${config:deckuser}@${config:deckip}:'${config:deckdir}/homebrew/plugins/${config:pluginname}/'; rc=$?; rm -rf \"$stage\"; exit $rc",
+      // sudo rsync on the remote side (plugins/ is root-owned) — needs the
+      // passwordless rule from scripts/setup-deck-sudo.sh. See deploy-plugin.sh
+      // for the staging/flattening rationale.
+      "command": "DECK_HOST='${config:deckuser}@${config:deckip}' DECK_PORT='${config:deckport}' DECK_KEY='${config:deckkey}' DECK_DIR='${config:deckdir}' PLUGIN_NAME='${config:pluginname}' bash scripts/deploy-plugin.sh",
       "problemMatcher": []
     },
-
-    // Restart Decky's backend so a changed main.py is reloaded and the
-    // plugin list refreshes. Frontend-only changes can use the in-UI
-    // "Reload" button instead, but this always works.
     {
       "label": "restartdecky",
       "type": "shell",
       "group": "none",
       "detail": "Restart the plugin_loader service on the Deck",
-      "command": "ssh -p ${config:deckport} ${config:deckkey} ${config:deckuser}@${config:deckip} 'sudo systemctl restart plugin_loader'",
+      "command": "DECK_HOST='${config:deckuser}@${config:deckip}' DECK_PORT='${config:deckport}' DECK_KEY='${config:deckkey}' bash scripts/restart-decky.sh",
       "problemMatcher": []
     },
 
@@ -72,7 +43,6 @@
     },
 
     // ─────────────────────────── UTILITIES ───────────────────────────
-    // Live-tail this plugin's backend log (decky.logger output).
     {
       "label": "taillog",
       "type": "shell",
@@ -82,14 +52,12 @@
       "problemMatcher": [],
       "isBackground": true
     },
-
-    // One-time connectivity check: confirms SSH key auth works.
     {
       "label": "checkconnection",
       "type": "shell",
       "group": "none",
       "detail": "Verify SSH access to the Deck",
-      "command": "ssh -p ${config:deckport} ${config:deckkey} ${config:deckuser}@${config:deckip} 'echo Connected to $(uname -n) as $(whoami); ls -d \"${config:deckdir}/homebrew/plugins\"'",
+      "command": "DECK_HOST='${config:deckuser}@${config:deckip}' DECK_PORT='${config:deckport}' DECK_KEY='${config:deckkey}' DECK_DIR='${config:deckdir}' bash scripts/check-connection.sh",
       "problemMatcher": []
     }
   ]
