@@ -12,7 +12,7 @@
       "root": "logs/PartyDeck/runs",
       "glob": "run-*.log",
       "latest": "symlink:latest.log",
-      "description": "Per-launch wrapper log: launcher-script trace (set -x) merged with the binary's outer stdout. The --kwin re-exec detaches the nested session so game output can escape this file — per-instance output lives in the sibling session dir instead. Pruned to 20 by the launcher script."
+      "description": "Per-launch wrapper log: launcher-script trace (set -x) merged with the binary's outer stdout. Per-instance game output lives in the sibling session dir; this file carries the wrapper trace and the binary's own output. Pruned to 20 by the launcher script."
     },
     "sessions": {
       "root": "logs/PartyDeck/runs",
