@@ -47,15 +47,13 @@ export type DeviceFilter = "all" | "no-steam-input" | "only-steam-input";
 // Mirrors PartyConfig in partydeck/src/app/config.rs — field names are the serde
 // wire names; set_config round-trips the whole object, so keep all fields.
 export interface PartyConfig {
-  enable_kwin_script: boolean;
   gamescope_fix_lowres: boolean;
-  gamescope_sdl_backend: boolean;
+  layout_preset: string;
   gamescope_force_grab_cursor: boolean;
   kbm_support: boolean;
   proton_version: string;
   proton_separate_pfxs: boolean;
   proton_wow64: boolean;
-  vertical_two_player: boolean;
   pad_filter_type: "All" | "NoSteamInput" | "OnlySteamInput";
   allow_multiple_instances_on_same_device: boolean;
   profile_unique_dirs: boolean;

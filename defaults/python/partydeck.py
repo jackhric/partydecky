@@ -1,24 +1,4 @@
-"""PartyDeck launcher orchestration.
-
-This is the backend that turns the plugin into a one-stop-shop for PartyDeck
-split-screen co-op. Responsibilities (Step 4a — GUI-launch milestone):
-
-  1. Ensure the PartyDeck binary bundle is present on-device (downloaded from
-     the upstream GitHub release on first run — we pin v0.8.5 because v0.8.6+
-     is built against glibc 2.43 and won't run on SteamOS's glibc 2.41).
-  2. Install bundled game handlers (the .pd2 packages shipped with the plugin)
-     into PartyDeck's data dir.
-  3. Write a known-good settings.json.
-  4. Launch PartyDeck's GUI inside a nested KWin session (exactly what upstream's
-     GamingModeLauncher.sh does: `./partydeck --kwin --fullscreen`).
-
-The user then picks players/controllers in PartyDeck's own GUI. A later step
-(4b) replaces the GUI launch with a true headless entrypoint + in-Decky
-controller assignment.
-
-Pure orchestration: no compilation here. The heavy gamescope/bwrap/goldberg
-command-building stays in the upstream binary.
-"""
+"""PartyDeck launcher orchestration."""
 
 import base64
 import hashlib
@@ -59,14 +39,12 @@ PARTYDECK_SIZE = 49965097
 # manual L4D2 launch). PartyDeck regenerates missing keys with its own defaults,
 # so this only needs to set the ones we care about.
 DEFAULT_SETTINGS = {
-    "enable_kwin_script": True,
     "gamescope_fix_lowres": True,
-    "gamescope_sdl_backend": True,
+    "layout_preset": "auto",
     "gamescope_force_grab_cursor": False,
     "kbm_support": True,
     "proton_version": "",
     "proton_separate_pfxs": True,
-    "vertical_two_player": False,
     "pad_filter_type": "All",
     "allow_multiple_instances_on_same_device": False,
     "disable_mount_gamedirs": False,
@@ -711,22 +689,22 @@ def ensure_setup() -> dict:
 
 LAUNCHER_NAME = "partydeck-launch.sh"
 PLAYERS_NAME = "launch-players.json"
+LAYOUT_NAME = "launch-layout.json"
 
 
 def write_launcher_script(
-    handler: str = "", players: list | None = None, appid: int = 0
+    handler: str = "", players: list | None = None, appid: int = 0,
+    layout: dict | None = None,
 ) -> Path:
     """Write the wrapper script Steam will execute, and return its path.
 
-    With a handler + players, the script launches that game headlessly, binding
-    each player to a Steam Input pad by XInput slot. The players payload goes to
-    a sidecar JSON file (passed by path) rather than through Steam launch options
-    — the `--kwin` re-exec re-quotes its forwarded args and would mangle inline
-    JSON. Without a handler, it falls back to the plain GUI (upstream behaviour).
-
-    `appid` is the Steam app the launch was prepared for; it (and the handler)
-    get baked into the per-run log filename so the Logs page can attribute runs.
-    """
+    With a handler + players, the script launches that game headlessly inside
+    partydeck-comp (the bundled tiling compositor), binding each player to a
+    Steam Input pad by XInput slot. The players payload goes to a sidecar JSON
+    file (passed by path) so Steam launch options never carry inline JSON.
+    `layout` ({"preset": ...} or a full layout document) is optional; without
+    it the binary tiles per the settings.json layout_preset. Without a handler,
+    it falls back to the plain GUI (upstream behaviour)."""
     import shlex
 
     runtime = _runtime_dir()
@@ -746,22 +724,24 @@ def write_launcher_script(
             raise ValueError("Two players cannot share the same profile.")
         players_file = runtime / PLAYERS_NAME
         players_file.write_text(json.dumps(players))
-        # `--kwin --fullscreen launch ...` runs the headless launch INSIDE the
-        # KWin session (gamescope tiling), per the binary's arg handling.
         invocation = (
-            f'"{binary}" --kwin --fullscreen launch '
+            f'"{binary}" launch '
             f"--handler {shlex.quote(handler)} "
             f'--players "{players_file}"'
         )
+        if layout:
+            layout_file = runtime / LAYOUT_NAME
+            layout_file.write_text(json.dumps(layout))
+            invocation += f' --layout "{layout_file}"'
     else:
-        # cd into the runtime dir so partydeck finds its sibling bin/ and res/,
-        # then exec the GUI inside a nested KWin session.
-        invocation = f'"{binary}" --kwin --fullscreen'
+        # cd into the runtime dir so partydeck finds its sibling bin/ and res/.
+        invocation = f'"{binary}" --fullscreen'
 
     # One per-session log file, wrapper trace and binary output merged. The
     # --kwin re-exec detaches the nested session, so binary output can escape
-    # the file — but the wrapper trace + exit code always survive, telling us
-    # whether Steam ran the script and how the outer process exited.
+    # the file — but PARTYDECK_SESSION_LOG_DIR survives the re-exec, so
+    # per-instance output still lands in the session dir, and the wrapper
+    # trace + exit code always survive here.
     safe_handler = re.sub(r"[^A-Za-z0-9._-]", "_", handler) if handler else ""
     suffix = (f"_SteamID-{appid}" if appid else "") + (
         f"_Handler-{safe_handler}" if safe_handler else ""
@@ -775,9 +755,14 @@ def write_launcher_script(
         "# is relaunched without prepare; at start (not exit) so it survives\n"
         "# Steam killing the wrapper mid-run.\n"
         'ls -1t "$RUNS_DIR"/run-*.log 2>/dev/null | tail -n +20 | xargs -r rm -f --\n'
+        'ls -1dt "$RUNS_DIR"/run-*/ 2>/dev/null | tail -n +20 | xargs -r rm -rf --\n'
         "# Timestamp at RUN time, not prepare time: the Steam shortcut can be\n"
         "# relaunched from the library without rewriting this script.\n"
-        f'RUN_LOG="$RUNS_DIR/run-$(date +%Y-%m-%d_%H-%M-%S){suffix}.log"\n'
+        'TS="$(date +%Y-%m-%d_%H-%M-%S)"\n'
+        f'RUN_LOG="$RUNS_DIR/run-${{TS}}{suffix}.log"\n'
+        "# Session dir shares the run log's stem; the binary creates it itself,\n"
+        "# so no dir appears for runs that never reach the binary.\n"
+        f'export PARTYDECK_SESSION_LOG_DIR="$RUNS_DIR/run-${{TS}}{suffix}"\n'
         'ln -sfn "$RUN_LOG" "$RUNS_DIR/latest.log"\n'
         '# >> so a same-second relaunch appends instead of truncating.\n'
         'exec >> "$RUN_LOG" 2>&1\n'
@@ -848,6 +833,7 @@ def list_run_logs(limit: int = 10) -> list[dict]:
                 pass
             appid = int(m.group(2)) if m.group(2) else None
             handler = m.group(3)
+        session_dir = path.with_suffix("")
         entries.append(
             {
                 "filename": path.name,
@@ -855,6 +841,7 @@ def list_run_logs(limit: int = 10) -> list[dict]:
                 "size_bytes": stat.st_size,
                 "appid": appid,
                 "handler": handler,
+                "session_dir": session_dir.name if session_dir.is_dir() else None,
             }
         )
     entries.sort(key=lambda e: e["timestamp"], reverse=True)

@@ -3,6 +3,7 @@ import {
   DialogButton,
   DialogControlsSection,
   DialogControlsSectionHeader,
+  DropdownItem,
   Field,
   Spinner,
   ToggleField,
@@ -102,12 +103,16 @@ export const GeneralPage: FC = () => {
           disabled={busy}
           onChange={(v) => patch("profile_unique_dirs", v)}
         />
-        <ToggleField
-          label="Vertical splitscreen"
-          description="Split the screen side-by-side instead of top/bottom when playing with two players. Has no effect with three or more players (always a quarter grid)."
-          checked={config.vertical_two_player}
+        <DropdownItem
+          label="Split layout"
+          description="How instances are tiled. auto/horizontal: two players stack top/bottom, three or more use a grid. vertical: two players sit side by side. grid: always quadrants."
+          rgOptions={["auto", "horizontal", "vertical", "grid"].map((p) => ({
+            data: p,
+            label: p,
+          }))}
+          selectedOption={config.layout_preset}
           disabled={busy}
-          onChange={(v) => patch("vertical_two_player", v)}
+          onChange={(o) => patch("layout_preset", o.data)}
         />
       </DialogControlsSection>
 

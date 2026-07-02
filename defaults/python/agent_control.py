@@ -6,6 +6,7 @@ main.py emits AGENT_LAUNCH_EVENT; the frontend listener (src/lib/agentControl.ts
 calls launchViaShortcut(). All paths come from partydeck.py.
 """
 
+import json
 import os
 import re
 import signal
@@ -24,6 +25,7 @@ AGENT_LAUNCH_EVENT = "agent_launch"
 _SESSION_PROCESS_NAMES = (
     partydeck.LAUNCHER_NAME,
     "partydeck",
+    "partydeck-comp",
     "gamescope-kbm",
     "gamescopereaper",
 )
@@ -103,11 +105,53 @@ def _newest_run_log() -> Path | None:
     return max(logs, key=lambda p: p.stat().st_mtime) if logs else None
 
 
+def _read_session_meta(session_dir: Path) -> dict | None:
+    try:
+        return json.loads((session_dir / "session.json").read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def _merge_session(result: dict, session_dir: Path, deadline: float, tail_lines: int) -> None:
+    """Fold the binary's session dir into the wait_for_run result. The wrapper
+    rc line can land before the binary finalizes session.json, so keep polling
+    for finished_at within the caller's deadline — but bail as soon as no
+    session process is left (killed / failed launch never writes it)."""
+    meta = _read_session_meta(session_dir)
+    while (
+        meta is not None
+        and meta.get("finished_at") is None
+        and is_session_running()
+        and time.monotonic() < deadline
+    ):
+        time.sleep(2)
+        meta = _read_session_meta(session_dir)
+    exit_codes = [inst.get("exit_code") for inst in (meta or {}).get("instances", [])]
+    result["session_dir"] = session_dir.name
+    result["exit_codes"] = exit_codes
+    if any(code not in (0, None) for code in exit_codes):
+        result["crashed"] = True
+    for log in sorted(
+        session_dir.glob("instance-*.log"),
+        key=lambda p: int(m.group()) if (m := re.search(r"\d+", p.stem)) else -1,
+    ):
+        try:
+            text = log.read_text(errors="replace")
+        except OSError:
+            continue
+        tail = "\n".join(text.splitlines()[-tail_lines:])
+        result["tail"] += f"\n--- {log.name} (tail) ---\n{tail}"
+
+
 def wait_for_run(since_mtime: int = 0, timeout_s: int = 60, tail_lines: int = 120) -> dict:
     """Block until a run newer than since_mtime finishes (or timeout), then
     return its metadata + tail. Pass the run-dir mtime from BEFORE the launch so
     a stale prior run isn't matched. Sleeps — call from an executor, not the loop.
-    since_mtime=0, timeout_s=0 reads the latest run without blocking."""
+    since_mtime=0, timeout_s=0 reads the latest run without blocking.
+
+    When the binary created the sibling session dir (run-<stem>/), the result
+    also carries session_dir, exit_codes (non-zero ⇒ crashed), and per-instance
+    log tails appended to `tail`; without it the shape is unchanged."""
     deadline = time.monotonic() + timeout_s
     while True:
         path = _newest_run_log()
@@ -115,7 +159,7 @@ def wait_for_run(since_mtime: int = 0, timeout_s: int = 60, tail_lines: int = 12
         if fresh:
             text = path.read_text(errors="replace")
             if _RUN_DONE_RE.search(text) or time.monotonic() >= deadline:
-                return {
+                result = {
                     "exists": True,
                     "filename": path.name,
                     "mtime": int(path.stat().st_mtime),
@@ -124,6 +168,10 @@ def wait_for_run(since_mtime: int = 0, timeout_s: int = 60, tail_lines: int = 12
                     "tail": "\n".join(text.splitlines()[-tail_lines:]),
                     "timed_out": not _RUN_DONE_RE.search(text),
                 }
+                session_dir = path.with_suffix("")
+                if session_dir.is_dir():
+                    _merge_session(result, session_dir, deadline, tail_lines)
+                return result
         if time.monotonic() >= deadline:
             return {"exists": bool(path), "timed_out": True}
         time.sleep(2)
