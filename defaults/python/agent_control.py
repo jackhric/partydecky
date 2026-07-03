@@ -28,6 +28,7 @@ _SESSION_PROCESS_NAMES = (
     "partydeck-comp",
     "gamescope-kbm",
     "gamescopereaper",
+    "cef-overlay",
 )
 
 
