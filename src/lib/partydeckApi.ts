@@ -74,6 +74,10 @@ export const deleteProfile = callable<[name: string], Profile[]>(
 );
 
 export const getConfig = callable<[], PartyConfig>("get_config");
+export const setActiveLayout = callable<
+  [layout: { preset: string; focus?: number } | object],
+  { ok: boolean; error?: string }
+>("set_active_layout");
 export const setConfig = callable<[config: PartyConfig], PartyConfig>(
   "set_config",
 );

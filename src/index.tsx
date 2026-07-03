@@ -6,6 +6,8 @@ import {
   staticClasses,
 } from "@decky/ui";
 import { definePlugin } from "@decky/api";
+import { toaster } from "@decky/api";
+import { setActiveLayout } from "./lib/partydeckApi";
 import { FaCog } from "react-icons/fa";
 import { PartyDeckIcon } from "./lib/PartyDeckIcon";
 import { patchGameButton, unpatchGameButton } from "./game-launch/GameButtonPatch";
@@ -23,6 +25,13 @@ function Content() {
     Navigation.CloseSideMenus();
     Navigation.Navigate(SETTINGS_ROUTE);
   };
+  const applyLayout = async (preset: string, label: string) => {
+    const res = await setActiveLayout({ preset });
+    toaster.toast({
+      title: "PartyDeck",
+      body: res.ok ? `Layout: ${label}` : res.error ?? "Layout change failed",
+    });
+  };
   return (
     <PanelSection title="PartyDeck">
       <PanelSectionRow>
@@ -39,6 +48,26 @@ function Content() {
           >
             <FaCog /> Settings
           </span>
+        </ButtonItem>
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <ButtonItem layout="below" onClick={() => applyLayout("horizontal", "stacked")}>
+          Layout: stacked
+        </ButtonItem>
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <ButtonItem layout="below" onClick={() => applyLayout("vertical", "side by side")}>
+          Layout: side by side
+        </ButtonItem>
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <ButtonItem layout="below" onClick={() => applyLayout("grid", "grid")}>
+          Layout: grid
+        </ButtonItem>
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <ButtonItem layout="below" onClick={() => applyLayout("priority", "focus player 1")}>
+          Layout: focus player 1
         </ButtonItem>
       </PanelSectionRow>
     </PanelSection>

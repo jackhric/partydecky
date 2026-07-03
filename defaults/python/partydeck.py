@@ -687,6 +687,71 @@ def ensure_setup() -> dict:
         "launcher": str(script),
     }
 
+def _preset_rects(preset: str, players: int) -> list[dict] | None:
+    """Mirror partydeck-comp's presets::by_name — fractional slot rects."""
+    def r(x, y, w, h):
+        return {"rect": {"x": x, "y": y, "w": w, "h": h}}
+
+    full = [r(0, 0, 1, 1)]
+    stacked = [r(0, 0, 1, 0.5), r(0, 0.5, 1, 0.5)]
+    side = [r(0, 0, 0.5, 1), r(0.5, 0, 0.5, 1)]
+    quads = [r(0, 0, 0.5, 0.5), r(0.5, 0, 0.5, 0.5), r(0, 0.5, 0.5, 0.5), r(0.5, 0.5, 0.5, 0.5)]
+
+    if players <= 1:
+        return full
+    if preset in ("auto", "horizontal", "grid"):
+        return stacked if (players == 2 and preset != "grid") else quads[:players]
+    if preset == "vertical":
+        return side if players == 2 else quads[:players]
+    if preset == "priority":
+        side_h = 1.0 / (players - 1)
+        return [r(0, 0, 0.7, 1)] + [r(0.7, i * side_h, 0.3, side_h) for i in range(players - 1)]
+    return None
+
+
+def _active_session_sockets() -> tuple[Path, int] | None:
+    """Find the live compositor's control socket and its player count."""
+    run_dir = Path(f"/run/user/{os.getuid()}")
+    for ctl in sorted(run_dir.glob("partydeck-*.ctl"), reverse=True):
+        pid = ctl.name.removeprefix("partydeck-").removesuffix(".ctl")
+        if not (pid.isdigit() and Path(f"/proc/{pid}").exists()):
+            continue
+        players = len(list(run_dir.glob(f"partydeck-{pid}-p*"))) - len(
+            list(run_dir.glob(f"partydeck-{pid}-p*.lock"))
+        )
+        return ctl, max(players, 1)
+    return None
+
+
+def set_active_layout(layout: dict) -> dict:
+    """Re-tile the running session. layout = {"preset": name} or a full
+    layout document (slots/focus/background) forwarded verbatim."""
+    import socket as unix_socket
+
+    active = _active_session_sockets()
+    if not active:
+        return {"ok": False, "error": "no PartyDeck session is running"}
+    ctl, players = active
+
+    if "preset" in layout and "slots" not in layout:
+        rects = _preset_rects(str(layout["preset"]), players)
+        if rects is None:
+            return {"ok": False, "error": f"unknown preset {layout['preset']!r}"}
+        doc = {"slots": rects, "focus": int(layout.get("focus", 0))}
+    else:
+        doc = layout
+
+    try:
+        with unix_socket.socket(unix_socket.AF_UNIX) as s:
+            s.settimeout(3)
+            s.connect(str(ctl))
+            s.sendall((json.dumps({"cmd": "set_layout", "layout": doc}) + "\n").encode())
+            reply = s.recv(4096).decode().strip()
+        return json.loads(reply) if reply else {"ok": False, "error": "empty reply"}
+    except (OSError, json.JSONDecodeError) as e:
+        return {"ok": False, "error": f"compositor IPC failed: {e}"}
+
+
 LAUNCHER_NAME = "partydeck-launch.sh"
 PLAYERS_NAME = "launch-players.json"
 LAYOUT_NAME = "launch-layout.json"
