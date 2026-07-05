@@ -203,6 +203,26 @@ class Plugin:
             None, partydeck.delete_profile, name
         )
 
+    async def set_profile_avatar(self, name: str, path: str) -> list:
+        return await self.loop.run_in_executor(
+            None, partydeck.set_profile_avatar, name, path
+        )
+
+    async def set_profile_avatar_builtin(self, name: str, id: str) -> list:
+        return await self.loop.run_in_executor(
+            None, partydeck.set_profile_avatar_builtin, name, id
+        )
+
+    async def clear_profile_avatar(self, name: str) -> list:
+        return await self.loop.run_in_executor(
+            None, partydeck.clear_profile_avatar, name
+        )
+
+    async def list_builtin_avatars(self) -> list:
+        return await self.loop.run_in_executor(
+            None, partydeck.list_builtin_avatars
+        )
+
     async def get_config(self) -> dict:
         return await self.loop.run_in_executor(None, partydeck.get_config)
 

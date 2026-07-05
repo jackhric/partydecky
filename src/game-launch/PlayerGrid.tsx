@@ -7,6 +7,8 @@ import type { Player } from "./usePlayerLobby";
 interface Props {
   players: Player[];
   profiles: string[];
+  /** Profile name -> avatar data-URL, for profiles that have one. */
+  avatars: Map<string, string>;
   /** Ms left in the hold-B-to-exit countdown, or null when B isn't held. */
   exitRemainingMs: number | null;
   /** Controllers currently mid B-hold to leave (drives the cell indicator). */
@@ -24,6 +26,7 @@ function columnsFor(count: number): number {
 export const PlayerGrid: FC<Props> = ({
   players,
   profiles,
+  avatars,
   exitRemainingMs,
   leavingControllers,
   onProfileChange,
@@ -125,6 +128,7 @@ export const PlayerGrid: FC<Props> = ({
           player={p}
           index={i}
           profiles={profiles}
+          avatars={avatars}
           // Profiles held by OTHER players — disabled in this cell's picker so
           // two players can't share one.
           takenProfiles={

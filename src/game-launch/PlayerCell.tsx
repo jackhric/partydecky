@@ -111,6 +111,8 @@ interface Props {
   player: Player;
   index: number;
   profiles: string[];
+  /** Profile name -> avatar data-URL, for profiles that have one. */
+  avatars: Map<string, string>;
   /** Profiles held by OTHER players — shown but disabled in this picker. */
   takenProfiles: Set<string>;
   /** True while this player's controller is mid B-hold to leave. */
@@ -124,12 +126,14 @@ export const PlayerCell: FC<Props> = ({
   player,
   index,
   profiles,
+  avatars,
   takenProfiles,
   leaving,
   compact,
   onProfileChange,
 }) => {
   const glyphX = useGlyphSpring(player.shakeTick, player.shakeDir);
+  const avatar = player.profile ? avatars.get(player.profile) ?? null : null;
 
   const openProfileMenu = () =>
     showContextMenu(
@@ -168,7 +172,7 @@ export const PlayerCell: FC<Props> = ({
         flexDirection: "column",
         gap: "0.75rem",
         padding: "1rem",
-        borderRadius: "8px",
+        borderRadius: "0px",
         background: "rgba(255,255,255,0.06)",
         border: "1px solid rgba(255,255,255,0.1)",
         // Grid items default to min-height:auto, which lets content push the
@@ -284,6 +288,17 @@ export const PlayerCell: FC<Props> = ({
       <Focusable
         style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}
       >
+        {avatar && (
+          <img
+            src={avatar}
+            style={{
+              flexShrink: 0,
+              width: "26px",
+              height: "26px",
+              objectFit: "cover",
+            }}
+          />
+        )}
         {/* Read-only: changing the profile goes through the hold-to-open
             selector button. */}
         <div
@@ -346,7 +361,19 @@ export const PlayerCell: FC<Props> = ({
                 : "none",
             }}
           />
-          <FaUser size={14} style={{ position: "relative" }} />
+          {avatar ? (
+            <img
+              src={avatar}
+              style={{
+                position: "relative",
+                width: "26px",
+                height: "26px",
+                objectFit: "cover",
+              }}
+            />
+          ) : (
+            <FaUser size={14} style={{ position: "relative" }} />
+          )}
         </DialogButton>
         </span>
         <DialogButton

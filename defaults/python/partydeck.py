@@ -41,6 +41,7 @@ PARTYDECK_SIZE = 49965097
 DEFAULT_SETTINGS = {
     "gamescope_fix_lowres": True,
     "layout_preset": "auto",
+    "border_style": "faint",
     "gamescope_force_grab_cursor": False,
     "kbm_support": True,
     "proton_version": "",
@@ -226,6 +227,25 @@ def create_profile(name: str) -> list[dict]:
 def delete_profile(name: str) -> list[dict]:
     _run_partydeck("profile", "delete", name)
     return list_profiles()
+
+
+def set_profile_avatar(name: str, path: str) -> list[dict]:
+    _run_partydeck("profile", "set-avatar", name, path)
+    return list_profiles()
+
+
+def set_profile_avatar_builtin(name: str, id: str) -> list[dict]:
+    _run_partydeck("profile", "set-avatar-builtin", name, id)
+    return list_profiles()
+
+
+def clear_profile_avatar(name: str) -> list[dict]:
+    _run_partydeck("profile", "clear-avatar", name)
+    return list_profiles()
+
+
+def list_builtin_avatars() -> list[dict]:
+    return _run_partydeck_json("profile", "list-builtin-avatars")
 
 
 def get_config() -> dict:

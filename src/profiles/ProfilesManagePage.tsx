@@ -6,16 +6,25 @@ import {
   DialogControlsSectionHeader,
   Field,
   Focusable,
+  ModalRoot,
   Spinner,
   TextField,
   showModal,
 } from "@decky/ui";
+import { FileSelectionType, openFilePicker } from "@decky/api";
 import { FC, useEffect, useMemo, useState } from "react";
-import { FaDice, FaTrash, FaUser, FaUserPlus } from "react-icons/fa";
+import { FaDice, FaImage, FaTrash, FaUser, FaUserPlus } from "react-icons/fa";
 import {
   listProfiles,
   createProfile,
   deleteProfile,
+  setProfileAvatar,
+  setProfileAvatarBuiltin,
+  clearProfileAvatar,
+  listBuiltinAvatars,
+  avatarSrc,
+  b64Src,
+  type BuiltinAvatar,
   type Profile,
 } from "../lib/partydeckApi";
 
@@ -29,6 +38,121 @@ const GUEST_NAMES = [
 ];
 
 const isAlphanumeric = (s: string) => /^[A-Za-z0-9]+$/.test(s);
+
+const AvatarPickerModal: FC<{
+  profile: Profile;
+  onChanged: (profiles: Profile[]) => void;
+  closeModal?: () => void;
+}> = ({ profile, onChanged, closeModal }) => {
+  const [builtins, setBuiltins] = useState<BuiltinAvatar[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    listBuiltinAvatars()
+      .then(setBuiltins)
+      .catch((e) => setError(String(e)));
+  }, []);
+
+  const apply = async (fn: () => Promise<Profile[]>) => {
+    setBusy(true);
+    setError(null);
+    try {
+      onChanged(await fn());
+      closeModal?.();
+    } catch (e) {
+      setError(String(e));
+      setBusy(false);
+    }
+  };
+
+  const onPickFile = async () => {
+    let res;
+    try {
+      res = await openFilePicker(
+        FileSelectionType.FILE,
+        "/home/deck",
+        true,
+        false,
+        undefined,
+        ["png"],
+      );
+    } catch {
+      return; // user cancelled the picker
+    }
+    if (res) await apply(() => setProfileAvatar(profile.name, res.realpath));
+  };
+
+  return (
+    <ModalRoot closeModal={closeModal}>
+      <DialogBody>
+        {error && (
+          <Field description={<span style={{ color: "#ff6b6b" }}>{error}</span>} />
+        )}
+        <DialogControlsSection>
+          <DialogControlsSectionHeader>
+            Picture for "{profile.name}"
+          </DialogControlsSectionHeader>
+          {builtins === null ? (
+            <Field label={<Spinner width={24} height={24} />} />
+          ) : (
+            <Focusable
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(64px, 1fr))",
+                gap: "0.75rem",
+                padding: "0.25rem 0",
+              }}
+            >
+              {builtins.map((a) => (
+                <DialogButton
+                  key={a.id}
+                  disabled={busy}
+                  onClick={() =>
+                    apply(() => setProfileAvatarBuiltin(profile.name, a.id))
+                  }
+                  style={{
+                    padding: "4px",
+                    minWidth: 0,
+                    aspectRatio: "1 / 1",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <img
+                    src={b64Src(a.b64)}
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "cover",
+                    }}
+                  />
+                </DialogButton>
+              ))}
+            </Focusable>
+          )}
+        </DialogControlsSection>
+        <DialogControlsSection>
+          <DialogButton disabled={busy} onClick={onPickFile}>
+            Choose file…
+          </DialogButton>
+          {avatarSrc(profile) && (
+            <DialogButton
+              disabled={busy}
+              onClick={() =>
+                apply(() => clearProfileAvatar(profile.name))
+              }
+              style={{ marginTop: "0.5rem" }}
+            >
+              Remove picture
+            </DialogButton>
+          )}
+        </DialogControlsSection>
+      </DialogBody>
+    </ModalRoot>
+  );
+};
 
 export const ProfilesManagePage: FC = () => {
   const [profiles, setProfiles] = useState<Profile[] | null>(null);
@@ -79,6 +203,12 @@ export const ProfilesManagePage: FC = () => {
     } finally {
       setBusy(false);
     }
+  };
+
+  const onSetPicture = (profile: Profile) => {
+    showModal(
+      <AvatarPickerModal profile={profile} onChanged={setProfiles} />,
+    );
   };
 
   const onDelete = (name: string) => {
@@ -176,27 +306,57 @@ export const ProfilesManagePage: FC = () => {
         ) : profiles.length === 0 ? (
           <Field description="No profiles yet." />
         ) : (
-          profiles.map((p) => (
-            <Field
-              key={p.name}
-              label={p.name}
-              icon={<FaUser />}
-              childrenContainerWidth="fixed"
-            >
-              <DialogButton
-                disabled={busy}
-                onClick={() => onDelete(p.name)}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: "0.5rem",
-                }}
+          profiles.map((p) => {
+            const src = avatarSrc(p);
+            return (
+              <Field
+                key={p.name}
+                label={p.name}
+                icon={
+                  src ? (
+                    <img
+                      src={src}
+                      style={{
+                        width: "26px",
+                        height: "26px",
+                        objectFit: "cover",
+                      }}
+                    />
+                  ) : (
+                    <FaUser />
+                  )
+                }
+                childrenContainerWidth="fixed"
               >
-                <FaTrash size={16} /> Delete
-              </DialogButton>
-            </Field>
-          ))
+                <Focusable style={{ display: "flex", gap: "0.5rem" }}>
+                  <DialogButton
+                    disabled={busy}
+                    onClick={() => onSetPicture(p)}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "0.5rem",
+                    }}
+                  >
+                    <FaImage size={16} /> Set picture
+                  </DialogButton>
+                  <DialogButton
+                    disabled={busy}
+                    onClick={() => onDelete(p.name)}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "0.5rem",
+                    }}
+                  >
+                    <FaTrash size={16} /> Delete
+                  </DialogButton>
+                </Focusable>
+              </Field>
+            );
+          })
         )}
       </DialogControlsSection>
     </DialogBody>

@@ -14,6 +14,7 @@ import { toaster } from "@decky/api";
 import { SETTINGS_ROUTE } from "../lib/routes";
 import { FC, useCallback, useEffect, useMemo, useState } from "react";
 import {
+  avatarSrc,
   downloadProton,
   listHandlers,
   listProfiles,
@@ -59,6 +60,7 @@ export const GameLaunchSettingsPage: FC = () => {
 
   const [handlers, setHandlers] = useState<Handler[] | null>(null);
   const [profiles, setProfiles] = useState<string[] | null>(null);
+  const [avatars, setAvatars] = useState<Map<string, string>>(new Map());
 
   // Not folded into `loading`: the status includes a best-effort network check
   // that can take a few seconds cold — render the lobby immediately and swap in
@@ -70,7 +72,17 @@ export const GameLaunchSettingsPage: FC = () => {
       .then(setHandlers)
       .catch(() => setHandlers([]));
     listProfiles()
-      .then((ps) => setProfiles(ps.map((p) => p.name)))
+      .then((ps) => {
+        setProfiles(ps.map((p) => p.name));
+        setAvatars(
+          new Map(
+            ps.flatMap((p) => {
+              const src = avatarSrc(p);
+              return src ? [[p.name, src] as [string, string]] : [];
+            }),
+          ),
+        );
+      })
       .catch(() => setProfiles([]));
     protonStatus()
       .then(setProton)
@@ -457,6 +469,7 @@ export const GameLaunchSettingsPage: FC = () => {
           <PlayerGrid
             players={players}
             profiles={profiles}
+            avatars={avatars}
             exitRemainingMs={exitRemainingMs}
             leavingControllers={leavingControllers}
             onProfileChange={setProfile}

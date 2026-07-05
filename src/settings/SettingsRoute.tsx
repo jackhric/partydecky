@@ -1,8 +1,9 @@
 import { SidebarNavigation } from "@decky/ui";
 import { routerHook } from "@decky/api";
 import { FC } from "react";
-import { FaCog, FaFileAlt, FaWindows } from "react-icons/fa";
+import { FaCog, FaFileAlt, FaSlidersH, FaWindows } from "react-icons/fa";
 import { GeneralPage } from "./GeneralPage";
+import { AdvancedPage } from "./AdvancedPage";
 import { ProtonPage } from "./ProtonPage";
 import { LogsPage } from "./LogsPage";
 import { SETTINGS_ROUTE } from "../lib/routes";
@@ -15,6 +16,14 @@ const SettingsRouter: FC = () => (
         icon: <FaCog />,
         content: <GeneralPage />,
         route: `${SETTINGS_ROUTE}/general`,
+        visible: true,
+      },
+      "separator",
+      {
+        title: "Advanced",
+        icon: <FaSlidersH />,
+        content: <AdvancedPage />,
+        route: `${SETTINGS_ROUTE}/advanced`,
         visible: true,
       },
       "separator",

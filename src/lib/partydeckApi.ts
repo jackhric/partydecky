@@ -5,6 +5,12 @@ import { callable } from "@decky/api";
 
 export interface Profile {
   name: string;
+  avatar?: string; // base64 PNG (no data-URL prefix), absent when unset
+}
+
+export interface BuiltinAvatar {
+  id: string;
+  b64: string;
 }
 
 export interface Handler {
@@ -49,6 +55,7 @@ export type DeviceFilter = "all" | "no-steam-input" | "only-steam-input";
 export interface PartyConfig {
   gamescope_fix_lowres: boolean;
   layout_preset: string;
+  border_style: "off" | "faint" | "medium" | "strong";
   gamescope_force_grab_cursor: boolean;
   kbm_support: boolean;
   proton_version: string;
@@ -72,6 +79,23 @@ export const createProfile = callable<[name: string], Profile[]>(
 export const deleteProfile = callable<[name: string], Profile[]>(
   "delete_profile",
 );
+export const setProfileAvatar = callable<[name: string, path: string], Profile[]>(
+  "set_profile_avatar",
+);
+export const setProfileAvatarBuiltin = callable<
+  [name: string, id: string],
+  Profile[]
+>("set_profile_avatar_builtin");
+export const clearProfileAvatar = callable<[name: string], Profile[]>(
+  "clear_profile_avatar",
+);
+export const listBuiltinAvatars = callable<[], BuiltinAvatar[]>(
+  "list_builtin_avatars",
+);
+
+export const avatarSrc = (p: Profile): string | null =>
+  p.avatar ? "data:image/png;base64," + p.avatar : null;
+export const b64Src = (b64: string) => "data:image/png;base64," + b64;
 
 export const getConfig = callable<[], PartyConfig>("get_config");
 export const setActiveLayout = callable<
