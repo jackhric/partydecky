@@ -10,6 +10,7 @@
 
 import { sleep } from "@decky/ui";
 import { getShortcutArtwork, type ShortcutArtwork } from "./partydeckApi";
+import { syncSessionResolution } from "./sessionResolution";
 
 const SHORTCUT_NAME = "PartyDeck";
 
@@ -227,6 +228,10 @@ export async function launchViaShortcut(
   // Record our shortcut's appId so the route patch knows which details page to
   // bounce away from (on launch + on game exit).
   partyDeckShortcutAppId = appId;
+
+  // Awaited so the launch-env file is in place before the launcher script runs;
+  // best-effort internally, so it can't block the launch.
+  await syncSessionResolution(appId);
 
   // 100 = ELaunchSource._2ftLibraryDetails (see @decky/ui App.d.ts ELaunchSource).
   SteamClient.Apps.RunGame(gameId, "", -1, 100);

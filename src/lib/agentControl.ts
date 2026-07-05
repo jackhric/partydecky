@@ -2,7 +2,12 @@
 // launchViaShortcut() — the backend can't RunGame itself (no display session).
 
 import { addEventListener, removeEventListener, toaster } from "@decky/api";
-import { launchViaShortcut } from "./steamShortcut";
+import {
+  findExistingShortcut,
+  getPartyDeckShortcutAppId,
+  launchViaShortcut,
+} from "./steamShortcut";
+import { syncSessionResolution } from "./sessionResolution";
 
 // Keep in sync with AGENT_LAUNCH_EVENT in defaults/python/agent_control.py.
 const AGENT_LAUNCH_EVENT = "agent_launch";
@@ -34,5 +39,19 @@ export function registerAgentControl(): () => void {
     AGENT_LAUNCH_EVENT,
     onAgentLaunch
   );
-  return () => removeEventListener(AGENT_LAUNCH_EVENT, listener);
+  // Direct library launches of the (persistent) shortcut bypass
+  // launchViaShortcut, so sync the resolution override here too.
+  const gameActionStart = SteamClient.Apps.RegisterForGameActionStart(
+    (_gameActionId, strAppId) => {
+      const appId = parseInt(strAppId, 10);
+      const ours = getPartyDeckShortcutAppId() ?? findExistingShortcut();
+      if (ours !== null && appId === ours) {
+        void syncSessionResolution(appId);
+      }
+    }
+  );
+  return () => {
+    removeEventListener(AGENT_LAUNCH_EVENT, listener);
+    gameActionStart.unregister();
+  };
 }

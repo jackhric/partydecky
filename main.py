@@ -211,6 +211,13 @@ class Plugin:
             None, partydeck.set_config, config
         )
 
+    async def set_session_resolution(
+        self, width: int = None, height: int = None
+    ) -> dict:
+        return await self.loop.run_in_executor(
+            None, partydeck.set_session_resolution, width, height
+        )
+
     async def set_active_layout(self, layout: dict) -> dict:
         return await self.loop.run_in_executor(
             None, partydeck.set_active_layout, layout

@@ -83,6 +83,13 @@ export const setConfig = callable<[config: PartyConfig], PartyConfig>(
 );
 export const erasePrefixes = callable<[], void>("erase_prefixes");
 
+// Writes/removes the launch-env file the launcher script sources; null clears
+// the override (see lib/sessionResolution.ts).
+export const setSessionResolution = callable<
+  [width: number | null, height: number | null],
+  { width: number | null; height: number | null }
+>("set_session_resolution");
+
 // Launch lifecycle. setup downloads/installs the binary (poll status); prepare
 // writes the launcher script for a given game + player assignment and returns
 // its path so the frontend can register + RunGame a Steam shortcut.

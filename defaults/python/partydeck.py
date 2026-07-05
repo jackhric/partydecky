@@ -755,6 +755,24 @@ def set_active_layout(layout: dict) -> dict:
 LAUNCHER_NAME = "partydeck-launch.sh"
 PLAYERS_NAME = "launch-players.json"
 LAYOUT_NAME = "launch-layout.json"
+LAUNCH_ENV_NAME = "launch-env.sh"
+
+
+def set_session_resolution(width: int | None = None, height: int | None = None) -> dict:
+    """Sync Gaming Mode's per-app resolution override into the launch env file
+    the launcher script sources. Both None = no override: remove the file."""
+    env_file = _runtime_dir() / LAUNCH_ENV_NAME
+    if width and height:
+        env_file.parent.mkdir(parents=True, exist_ok=True)
+        env_file.write_text(
+            f"export PARTYDECK_SCREEN_WIDTH={int(width)}\n"
+            f"export PARTYDECK_SCREEN_HEIGHT={int(height)}\n"
+        )
+        decky.logger.info("Session resolution override: %dx%d", width, height)
+    else:
+        env_file.unlink(missing_ok=True)
+        decky.logger.info("Session resolution override cleared")
+    return {"width": width, "height": height}
 
 
 def write_launcher_script(
@@ -813,6 +831,7 @@ def write_launcher_script(
     )
     script.write_text(
         "#!/bin/bash\n"
+        f'[ -f "{runtime / LAUNCH_ENV_NAME}" ] && . "{runtime / LAUNCH_ENV_NAME}"\n'
         f'RUNS_DIR="{_runs_dir()}"\n'
         'mkdir -p "$RUNS_DIR"\n'
         "# Prune BEFORE creating this run's log: keep the 19 newest so this run\n"
