@@ -30,7 +30,7 @@ const GUEST_NAMES = [
 
 const isAlphanumeric = (s: string) => /^[A-Za-z0-9]+$/.test(s);
 
-export const ProfilesPage: FC = () => {
+export const ProfilesManagePage: FC = () => {
   const [profiles, setProfiles] = useState<Profile[] | null>(null);
   const [newName, setNewName] = useState("");
   const [busy, setBusy] = useState(false);

@@ -2,3 +2,4 @@
 // GAME_SETTINGS_ROUTE) live with the feature that registers them.
 
 export const SETTINGS_ROUTE = "/partydeck/settings";
+export const PROFILES_ROUTE = "/partydeck/profiles";

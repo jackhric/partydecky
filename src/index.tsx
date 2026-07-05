@@ -8,7 +8,7 @@ import {
 import { definePlugin } from "@decky/api";
 import { toaster } from "@decky/api";
 import { setActiveLayout } from "./lib/partydeckApi";
-import { FaCog } from "react-icons/fa";
+import { FaCog, FaUser } from "react-icons/fa";
 import { PartyDeckIcon } from "./lib/PartyDeckIcon";
 import { patchGameButton, unpatchGameButton } from "./game-launch/GameButtonPatch";
 import {
@@ -17,13 +17,18 @@ import {
 } from "./shortcut/ShortcutRedirectPatch";
 import { registerGameSettingsRoute } from "./game-launch/GameSettingsRoute";
 import { registerSettingsRoute } from "./settings/SettingsRoute";
+import { registerProfilesRoute } from "./profiles/ProfilesRoute";
 import { registerAgentControl } from "./lib/agentControl";
-import { SETTINGS_ROUTE } from "./lib/routes";
+import { SETTINGS_ROUTE, PROFILES_ROUTE } from "./lib/routes";
 
 function Content() {
   const openSettings = () => {
     Navigation.CloseSideMenus();
     Navigation.Navigate(SETTINGS_ROUTE);
+  };
+  const openProfiles = () => {
+    Navigation.CloseSideMenus();
+    Navigation.Navigate(PROFILES_ROUTE);
   };
   const applyLayout = async (preset: string, label: string) => {
     const res = await setActiveLayout({ preset });
@@ -47,6 +52,20 @@ function Content() {
             }}
           >
             <FaCog /> Settings
+          </span>
+        </ButtonItem>
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <ButtonItem layout="below" onClick={openProfiles}>
+          <span
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "0.5rem",
+            }}
+          >
+            <FaUser /> Profiles
           </span>
         </ButtonItem>
       </PanelSectionRow>
@@ -77,6 +96,7 @@ function Content() {
 export default definePlugin(() => {
   const unregisterGameSettingsRoute = registerGameSettingsRoute();
   const unregisterSettingsRoute = registerSettingsRoute();
+  const unregisterProfilesRoute = registerProfilesRoute();
   const gameButtonPatch = patchGameButton();
   const shortcutRedirectPatch = patchShortcutRedirect();
   const unregisterAgentControl = registerAgentControl();
@@ -91,6 +111,7 @@ export default definePlugin(() => {
       unpatchShortcutRedirect(shortcutRedirectPatch);
       unregisterGameSettingsRoute();
       unregisterSettingsRoute();
+      unregisterProfilesRoute();
       unregisterAgentControl();
     },
   };

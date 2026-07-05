@@ -1,8 +1,7 @@
 import { SidebarNavigation } from "@decky/ui";
 import { routerHook } from "@decky/api";
 import { FC } from "react";
-import { FaCog, FaFileAlt, FaUser, FaWindows } from "react-icons/fa";
-import { ProfilesPage } from "./ProfilesPage";
+import { FaCog, FaFileAlt, FaWindows } from "react-icons/fa";
 import { GeneralPage } from "./GeneralPage";
 import { ProtonPage } from "./ProtonPage";
 import { LogsPage } from "./LogsPage";
@@ -12,20 +11,13 @@ const SettingsRouter: FC = () => (
   <SidebarNavigation
     pages={[
       {
-        title: "Profiles",
-        icon: <FaUser />,
-        content: <ProfilesPage />,
-        route: `${SETTINGS_ROUTE}/profiles`,
-        visible: true,
-      },
-      "separator",
-      {
         title: "General",
         icon: <FaCog />,
         content: <GeneralPage />,
         route: `${SETTINGS_ROUTE}/general`,
         visible: true,
       },
+      "separator",
       {
         title: "Proton",
         icon: <FaWindows />,
