@@ -26,10 +26,11 @@ import {
   type ProtonStatus,
 } from "../lib/partydeckApi";
 import { launchViaShortcut } from "../lib/steamShortcut";
+import { startControllerWatch } from "./controllerWatch";
 import { playExitMenuSound, playLaunchGameSound } from "./navSound";
 import { getControllers } from "./steamInput";
 import { FaDownload, FaExclamationTriangle } from "react-icons/fa";
-import { PartyDeckIcon } from "../lib/PartyDeckIcon";
+import { PartyDeckHeader } from "../lib/PartyDeckHeader";
 import { PlayerGrid } from "./PlayerGrid";
 import { StartButton } from "./StartButton";
 import { usePlayerLobby } from "./usePlayerLobby";
@@ -182,13 +183,24 @@ export const GameLaunchSettingsPage: FC = () => {
       // controllerIndex — a reconnect between join and Start can change the slot,
       // and the join-time value would be stale. Array order = split order.
       const live = getControllers();
-      const payload = players.map((p) => {
+      const resolved = players.map((p, slot) => {
         const cur = live.find((c) => c.index === p.controllerIndex);
         return {
+          slot,
           profile: p.profile as string,
           xinput: cur ? cur.xinput : p.xinput,
+          serial: cur?.serial ?? "",
         };
       });
+      const payload = resolved.map((p) => ({
+        profile: p.profile,
+        xinput: p.xinput,
+      }));
+      const watchPlayers = resolved.map(({ slot, xinput, serial }) => ({
+        slot,
+        xinput,
+        serial,
+      }));
 
       // Guard: every slot must be valid and unique, or two instances bind the
       // same pad (one player drives both, the other is dead). Abort loudly
@@ -230,6 +242,8 @@ export const GameLaunchSettingsPage: FC = () => {
       const shortcutAppId = await launchViaShortcut(exe, directory);
       if (shortcutAppId === null) {
         toaster.toast({ title: "PartyDeck", body: "Failed to launch." });
+      } else {
+        startControllerWatch(watchPlayers, shortcutAppId);
       }
     } catch (e) {
       console.error("[partydeck] launch failed", e);
@@ -262,67 +276,25 @@ export const GameLaunchSettingsPage: FC = () => {
         paddingBottom: "calc(40px + 1rem)",
       }}
     >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: "1rem",
-          borderBottom: "1px solid rgba(255,255,255,0.1)",
-          paddingBottom: "0.5rem",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "baseline",
-            gap: "0.75rem",
-            minWidth: 0,
-          }}
-        >
-          {/* fontSize (not width/height) so the 1em icon tracks the title size;
-              baseline alignment in the row keeps it sitting on the text line.
-              translateY compensates the square viewBox's vertical letterbox
-              ((1 - 39.3/48.9)/2 ≈ 0.1em) so the glyph bottom hits the baseline. */}
-          <PartyDeckIcon
-            style={{
-              fontSize: "1.3rem",
-              flexShrink: 0,
-              transform: "translateY(0.1em)",
-            }}
-          />
-          <span
-            style={{
-              fontSize: "1.3rem",
-              fontWeight: 600,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {title}
-          </span>
-          {handler && (
-            <span
-              style={{
-                fontSize: "0.9rem",
-                opacity: 0.6,
-                whiteSpace: "nowrap",
-              }}
-            >
-              {handler.win ? "Proton" : "Native"}
-              {handler.version ? ` · v${handler.version}` : ""}
+      <PartyDeckHeader
+        title={title}
+        subtitle={
+          handler
+            ? `${handler.win ? "Proton" : "Native"}${
+                handler.version ? ` · v${handler.version}` : ""
+              }`
+            : undefined
+        }
+        right={
+          handler ? (
+            <StartButton canStart={canStart} onStart={onStart} />
+          ) : (
+            <span style={{ fontSize: "1.1rem", opacity: 0.7, fontWeight: 600 }}>
+              PartyDeck
             </span>
-          )}
-        </div>
-        {handler ? (
-          <StartButton canStart={canStart} onStart={onStart} />
-        ) : (
-          <span style={{ fontSize: "1.1rem", opacity: 0.7, fontWeight: 600 }}>
-            PartyDeck
-          </span>
-        )}
-      </div>
+          )
+        }
+      />
 
       {loading ? (
         // These informational branches have no buttons, but they must still

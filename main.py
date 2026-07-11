@@ -243,6 +243,11 @@ class Plugin:
             None, partydeck.set_active_layout, layout
         )
 
+    async def set_controller_connected(self, slot: int, connected: bool) -> dict:
+        return await self.loop.run_in_executor(
+            None, partydeck.set_controller_connected, slot, connected
+        )
+
     async def erase_prefixes(self) -> None:
         return await self.loop.run_in_executor(None, partydeck.erase_prefixes)
 

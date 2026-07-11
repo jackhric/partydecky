@@ -18,6 +18,7 @@ import {
 import { registerGameSettingsRoute } from "./game-launch/GameSettingsRoute";
 import { registerSettingsRoute } from "./settings/SettingsRoute";
 import { registerProfilesRoute } from "./profiles/ProfilesRoute";
+import { registerProfileAvatarRoute } from "./profiles/AvatarPickerRoute";
 import { registerAgentControl } from "./lib/agentControl";
 import { SETTINGS_ROUTE, PROFILES_ROUTE } from "./lib/routes";
 
@@ -97,6 +98,7 @@ export default definePlugin(() => {
   const unregisterGameSettingsRoute = registerGameSettingsRoute();
   const unregisterSettingsRoute = registerSettingsRoute();
   const unregisterProfilesRoute = registerProfilesRoute();
+  const unregisterProfileAvatarRoute = registerProfileAvatarRoute();
   const gameButtonPatch = patchGameButton();
   const shortcutRedirectPatch = patchShortcutRedirect();
   const unregisterAgentControl = registerAgentControl();
@@ -112,6 +114,7 @@ export default definePlugin(() => {
       unregisterGameSettingsRoute();
       unregisterSettingsRoute();
       unregisterProfilesRoute();
+      unregisterProfileAvatarRoute();
       unregisterAgentControl();
     },
   };

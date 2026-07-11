@@ -102,6 +102,10 @@ export const setActiveLayout = callable<
   [layout: { preset: string; focus?: number } | object],
   { ok: boolean; error?: string }
 >("set_active_layout");
+export const setControllerConnected = callable<
+  [slot: number, connected: boolean],
+  { ok: boolean; error?: string }
+>("set_controller_connected");
 export const setConfig = callable<[config: PartyConfig], PartyConfig>(
   "set_config",
 );

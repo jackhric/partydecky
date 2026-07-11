@@ -12,7 +12,12 @@ export interface SteamController {
   // ("Microsoft X-Box 360 pad N" / devices `xinput_slot`), so launch can route
   // each lobby player to the right pad. -1 if Steam didn't assign one.
   xinput: number;
+  // Stable identity across reconnects — index/xinput can change when a pad
+  // drops and rejoins. "" if Steam doesn't report one.
+  serial: string;
 }
+
+export const BUTTON_A = 0;
 
 // Subset of the ControllerInputGamepadButton enum (full range 0..50).
 export const GAMEPAD_BUTTON_NAMES: Record<number, string> = {
@@ -48,6 +53,7 @@ export function getControllers(): SteamController[] {
       type: c.eControllerType ?? 0,
       vendorId: c.unVendorID ?? 0,
       xinput: c.nXInputIndex ?? -1,
+      serial: c.strSerialNumber ?? "",
     }));
   } catch {
     return [];
@@ -83,6 +89,16 @@ export function registerInput(
 export function identifyController(index: number): void {
   try {
     sc()?.IdentifyController?.(index);
+  } catch {
+    /* ignore */
+  }
+}
+
+// Takes XINPUT slot numbers, not controller indices; acts as a move when one
+// slot is empty. Fire-and-forget — truth is re-reading getControllers().
+export function swapControllerOrder(slotA: number, slotB: number): void {
+  try {
+    sc()?.SwapControllerOrder?.(slotA, slotB);
   } catch {
     /* ignore */
   }

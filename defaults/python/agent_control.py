@@ -21,15 +21,21 @@ from python import partydeck
 # Keep in sync with AGENT_LAUNCH_EVENT in src/lib/agentControl.ts.
 AGENT_LAUNCH_EVENT = "agent_launch"
 
-# Not "bwrap"/the game exe — too broad, would catch unrelated processes.
-_SESSION_PROCESS_NAMES = (
-    partydeck.LAUNCHER_NAME,
+# Matched with pgrep -x (comm-exact, all <=15 chars) — never "bwrap"/the game
+# exe, too broad. The launcher script is matched separately by its full path.
+_SESSION_EXACT_NAMES = (
     "partydeck",
     "partydeck-comp",
     "gamescope-kbm",
     "gamescopereaper",
     "cef-overlay",
 )
+
+
+def _session_pid_queries() -> list[tuple[str, bool]]:
+    queries = [(name, True) for name in _SESSION_EXACT_NAMES]
+    queries.append((str(partydeck._runtime_dir() / partydeck.LAUNCHER_NAME), False))
+    return queries
 
 
 def build_launch_request(
@@ -39,13 +45,22 @@ def build_launch_request(
     if not partydeck.is_binary_installed():
         raise RuntimeError("PartyDeck not installed yet — run setup first")
     info = partydeck.get_launcher_info(handler, players, appid)
-    return {"exe": info["exe"], "directory": info["directory"]}
+    return {
+        "exe": info["exe"],
+        "directory": info["directory"],
+        # Cell order = players order; the frontend needs the slots to watch
+        # controller connect/disconnect for the session.
+        "xinput_slots": [p.get("xinput", -1) for p in (players or [])],
+    }
 
 
-def _pids_for(name: str) -> list[int]:
+def _pids_for(name: str, exact: bool) -> list[int]:
     try:
         out = subprocess.run(  # noqa: S603 (fixed argv, no shell)
-            ["pgrep", "-f", name], capture_output=True, text=True, check=False
+            ["pgrep", "-x" if exact else "-f", name],
+            capture_output=True,
+            text=True,
+            check=False,
         )
     except FileNotFoundError:
         decky.logger.warning("agent_control: pgrep not found; cannot stop by name")
@@ -56,7 +71,86 @@ def _pids_for(name: str) -> list[int]:
 
 
 def is_session_running() -> bool:
-    return any(_pids_for(name) for name in _SESSION_PROCESS_NAMES)
+    return any(_pids_for(name, exact) for name, exact in _session_pid_queries())
+
+
+def _overlay_tmp_dir() -> Path:
+    # Mirrors PATH_PARTY.join("tmp") in partydeck/src/launch.rs, where
+    # fuse_overlayfs_mount_gamedirs mounts tmp/game-<i>.
+    return partydeck._party_data_dir() / "tmp"
+
+
+def _read_proc_mounts() -> str:
+    try:
+        return Path("/proc/mounts").read_text()
+    except OSError:
+        return ""
+
+
+def _unescape_mount(field: str) -> str:
+    return re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)), field)
+
+
+def _partydeck_fuse_mountpoints() -> list[str]:
+    prefix = str(_overlay_tmp_dir())
+    points = []
+    for line in _read_proc_mounts().splitlines():
+        fields = line.split()
+        if len(fields) < 3 or fields[2] != "fuse.fuse-overlayfs":
+            continue
+        mnt = _unescape_mount(fields[1])
+        if mnt == prefix or mnt.startswith(prefix + "/"):
+            points.append(mnt)
+    return points
+
+
+def _fusermount_unmount(mountpoint: str) -> bool:
+    # Falls back to plain fusermount only when fusermount3 is absent; a busy
+    # failure is retried by the caller instead.
+    for exe in ("fusermount3", "fusermount"):
+        try:
+            proc = subprocess.run(  # noqa: S603 (fixed argv, no shell)
+                [exe, "-u", mountpoint], capture_output=True, text=True, check=False
+            )
+        except FileNotFoundError:
+            continue
+        return proc.returncode == 0
+    return False
+
+
+def _proc_cmdline(pid: int) -> str:
+    try:
+        return Path(f"/proc/{pid}/cmdline").read_bytes().decode(errors="replace")
+    except OSError:
+        return ""
+
+
+def _cleanup_fuse_overlays() -> dict:
+    """Best-effort teardown of partydeck's game-N fuse-overlayfs mounts. A
+    SIGKILLed session never unmounts them, and the next launch then fails with
+    'fuse-overlayfs: cannot mount'. The orphaned daemons must die BEFORE the
+    unmount — a live orphan keeps its mount busy and fusermount -u fails.
+    Only touches mounts under the partydeck tmp dir — never unrelated fuse
+    mounts."""
+    result: dict[str, list] = {"unmounted": [], "unmount_failed": [], "killed": []}
+    prefix = str(_overlay_tmp_dir())
+    for pid in _pids_for("fuse-overlayfs", True):
+        if prefix not in _proc_cmdline(pid):
+            continue
+        try:
+            os.kill(pid, signal.SIGKILL)
+            result["killed"].append(pid)
+        except (ProcessLookupError, PermissionError):
+            pass
+    if result["killed"]:
+        time.sleep(0.5)
+    for mnt in _partydeck_fuse_mountpoints():
+        ok = _fusermount_unmount(mnt)
+        if not ok:
+            time.sleep(0.5)
+            ok = _fusermount_unmount(mnt)
+        result["unmounted" if ok else "unmount_failed"].append(mnt)
+    return result
 
 
 def stop_session(force: bool = False) -> dict:
@@ -64,8 +158,9 @@ def stop_session(force: bool = False) -> dict:
     game-N overlays, then SIGKILL stragglers; force=True SIGKILLs immediately."""
     sig = signal.SIGKILL if force else signal.SIGTERM
     killed: dict[str, list[int]] = {}
-    for name in _SESSION_PROCESS_NAMES:
-        pids = _pids_for(name)
+    queries = _session_pid_queries()
+    for name, exact in queries:
+        pids = _pids_for(name, exact)
         if not pids:
             continue
         killed[name] = pids
@@ -79,15 +174,18 @@ def stop_session(force: bool = False) -> dict:
 
     if not force and killed:
         time.sleep(2)
-        for name in _SESSION_PROCESS_NAMES:
-            for pid in _pids_for(name):
+        for name, exact in queries:
+            for pid in _pids_for(name, exact):
                 try:
                     os.kill(pid, signal.SIGKILL)
                 except (ProcessLookupError, PermissionError):
                     pass
 
-    decky.logger.info("agent_control: stop_session killed=%s", killed)
-    return {"killed": killed}
+    fuse_cleanup = _cleanup_fuse_overlays()
+    decky.logger.info(
+        "agent_control: stop_session killed=%s fuse_cleanup=%s", killed, fuse_cleanup
+    )
+    return {"killed": killed, "fuse_cleanup": fuse_cleanup}
 
 
 # Crash signatures (wrapper rc can be a misleading 0); DONE adds the rc line.

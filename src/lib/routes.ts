@@ -3,3 +3,4 @@
 
 export const SETTINGS_ROUTE = "/partydeck/settings";
 export const PROFILES_ROUTE = "/partydeck/profiles";
+export const PROFILE_AVATAR_ROUTE = "/partydeck/profiles/avatar";

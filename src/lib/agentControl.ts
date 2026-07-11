@@ -3,6 +3,10 @@
 
 import { addEventListener, removeEventListener, toaster } from "@decky/api";
 import {
+  resolvePlayerSerials,
+  startControllerWatch,
+} from "../game-launch/controllerWatch";
+import {
   findExistingShortcut,
   getPartyDeckShortcutAppId,
   launchViaShortcut,
@@ -15,6 +19,7 @@ const AGENT_LAUNCH_EVENT = "agent_launch";
 interface AgentLaunchPayload {
   exe: string;
   directory: string;
+  xinput_slots?: number[];
 }
 
 async function onAgentLaunch(payload: AgentLaunchPayload): Promise<void> {
@@ -27,6 +32,8 @@ async function onAgentLaunch(payload: AgentLaunchPayload): Promise<void> {
     const appId = await launchViaShortcut(payload.exe, payload.directory);
     if (appId === null) {
       toaster.toast({ title: "PartyDeck", body: "Agent launch failed to start." });
+    } else if (payload.xinput_slots?.length) {
+      startControllerWatch(resolvePlayerSerials(payload.xinput_slots), appId);
     }
   } catch (e) {
     console.error("PartyDeck: agent_launch error", e);

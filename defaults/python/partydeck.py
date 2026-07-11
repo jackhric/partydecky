@@ -253,7 +253,11 @@ def get_config() -> dict:
 
 
 def set_config(config: dict) -> dict:
-    _run_partydeck("config", "set-json", json.dumps(config))
+    # `config set-json` deserializes into the full PartyConfig struct, so any
+    # key missing from the JSON is silently reset to its serde default. Merge
+    # onto the live config so partial updates preserve unspecified values.
+    merged = {**get_config(), **config}
+    _run_partydeck("config", "set-json", json.dumps(merged))
     return get_config()
 
 
@@ -730,17 +734,33 @@ def _preset_rects(preset: str, players: int) -> list[dict] | None:
 
 
 def _active_session_sockets() -> tuple[Path, int] | None:
-    """Find the live compositor's control socket and its player count."""
+    """Find the live compositor's control socket and its player count.
+    Force-killed sessions leave their sockets behind, so dead ones are
+    filtered out and unlinked here."""
     run_dir = Path(f"/run/user/{os.getuid()}")
-    for ctl in sorted(run_dir.glob("partydeck-*.ctl"), reverse=True):
+    live: list[tuple[float, str, Path]] = []
+    for ctl in run_dir.glob("partydeck-*.ctl"):
         pid = ctl.name.removeprefix("partydeck-").removesuffix(".ctl")
-        if not (pid.isdigit() and Path(f"/proc/{pid}").exists()):
+        if not pid.isdigit():
             continue
-        players = len(list(run_dir.glob(f"partydeck-{pid}-p*"))) - len(
-            list(run_dir.glob(f"partydeck-{pid}-p*.lock"))
-        )
-        return ctl, max(players, 1)
-    return None
+        if Path(f"/proc/{pid}").exists():
+            try:
+                live.append((ctl.stat().st_mtime, pid, ctl))
+            except OSError:
+                pass
+        else:
+            for stale in [ctl, *run_dir.glob(f"partydeck-{pid}[.-]*")]:
+                try:
+                    stale.unlink()
+                except OSError:
+                    pass
+    if not live:
+        return None
+    _, pid, ctl = max(live)
+    players = len(list(run_dir.glob(f"partydeck-{pid}-p*"))) - len(
+        list(run_dir.glob(f"partydeck-{pid}-p*.lock"))
+    )
+    return ctl, max(players, 1)
 
 
 def set_active_layout(layout: dict) -> dict:
@@ -766,6 +786,31 @@ def set_active_layout(layout: dict) -> dict:
             s.settimeout(3)
             s.connect(str(ctl))
             s.sendall((json.dumps({"cmd": "set_layout", "layout": doc}) + "\n").encode())
+            reply = s.recv(4096).decode().strip()
+        return json.loads(reply) if reply else {"ok": False, "error": "empty reply"}
+    except (OSError, json.JSONDecodeError) as e:
+        return {"ok": False, "error": f"compositor IPC failed: {e}"}
+
+
+def set_controller_connected(slot: int, connected: bool) -> dict:
+    """Tell the running session's compositor a player's controller (dis)connected."""
+    import socket as unix_socket
+
+    active = _active_session_sockets()
+    if not active:
+        return {"ok": False, "error": "no PartyDeck session is running"}
+    ctl, _ = active
+
+    cmd = {
+        "cmd": "set_controller_connected",
+        "slot": int(slot),
+        "connected": bool(connected),
+    }
+    try:
+        with unix_socket.socket(unix_socket.AF_UNIX) as s:
+            s.settimeout(3)
+            s.connect(str(ctl))
+            s.sendall((json.dumps(cmd) + "\n").encode())
             reply = s.recv(4096).decode().strip()
         return json.loads(reply) if reply else {"ok": False, "error": "empty reply"}
     except (OSError, json.JSONDecodeError) as e:
