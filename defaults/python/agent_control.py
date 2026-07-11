@@ -48,8 +48,9 @@ def build_launch_request(
     return {
         "exe": info["exe"],
         "directory": info["directory"],
-        # Cell order = players order; the frontend needs the slots to watch
-        # controller connect/disconnect for the session.
+        # The slots the launcher script was written with: the frontend resolves
+        # each pad's serial at its slot and watches the session — pads are never
+        # rearranged at launch.
         "xinput_slots": [p.get("xinput", -1) for p in (players or [])],
     }
 

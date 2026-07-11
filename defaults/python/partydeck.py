@@ -5,7 +5,9 @@ import hashlib
 import json
 import os
 import re
+import select
 import shutil
+import struct
 import subprocess
 import tarfile
 import time
@@ -200,6 +202,64 @@ def list_handlers() -> list[dict]:
 def list_devices(filter: str = "all") -> list[dict]:
     # filter: "all" | "no-steam-input" | "only-steam-input"
     return _run_partydeck_json("devices", "--filter", filter)
+
+
+def probe_pad_events(seconds: float = 6.0) -> dict:
+    """Watch Steam Input virtual pad evdev nodes and count events per node,
+    so a human pressing buttons on one physical controller reveals which
+    virtual pad it feeds."""
+    event = struct.Struct("llHHi")  # 64-bit struct input_event
+    nodes = []
+    fds: dict[int, dict] = {}
+    for dev in list_devices("only-steam-input"):
+        if dev.get("type") != "gamepad":
+            continue
+        node = {
+            "path": dev.get("path"),
+            "xinput_slot": dev.get("xinput_slot"),
+            "key_events": 0,
+            "abs_events": 0,
+            "key_codes": set(),
+        }
+        nodes.append(node)
+        try:
+            fds[os.open(node["path"], os.O_RDONLY | os.O_NONBLOCK)] = node
+        except OSError as e:
+            node["error"] = f"{e.errno} ({os.strerror(e.errno)})"
+
+    deadline = time.monotonic() + seconds
+    try:
+        while fds:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            readable, _, _ = select.select(list(fds), [], [], remaining)
+            for fd in readable:
+                node = fds[fd]
+                try:
+                    data = os.read(fd, event.size * 64)
+                except BlockingIOError:
+                    continue
+                except OSError as e:
+                    node["error"] = f"{e.errno} ({os.strerror(e.errno)})"
+                    os.close(fd)
+                    del fds[fd]
+                    continue
+                whole = len(data) - len(data) % event.size
+                for _, _, etype, code, value in event.iter_unpack(data[:whole]):
+                    if etype == 1:
+                        node["key_events"] += 1
+                        if value == 1 and len(node["key_codes"]) < 16:
+                            node["key_codes"].add(code)
+                    elif etype == 3:
+                        node["abs_events"] += 1
+    finally:
+        for fd in fds:
+            os.close(fd)
+
+    for node in nodes:
+        node["key_codes"] = sorted(node["key_codes"])
+    return {"seconds": seconds, "nodes": nodes}
 
 
 def _run_partydeck(*args: str) -> None:
@@ -870,6 +930,13 @@ def write_launcher_script(
             raise ValueError("Every player must have a profile assigned.")
         if len(set(profiles)) != len(profiles):
             raise ValueError("Two players cannot share the same profile.")
+        # Array order stays the cell/split order; each player keeps the xinput
+        # slot the caller sent (pads are adopted where they sit, never swapped).
+        slots = [p.get("xinput") for p in players]
+        if any(not isinstance(s, int) or s < 0 for s in slots):
+            raise ValueError("Every player must have a valid XInput slot.")
+        if len(set(slots)) != len(slots):
+            raise ValueError("Two players cannot share the same XInput slot.")
         players_file = runtime / PLAYERS_NAME
         players_file.write_text(json.dumps(players))
         invocation = (

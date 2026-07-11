@@ -193,6 +193,11 @@ class Plugin:
             None, partydeck.list_devices, filter
         )
 
+    async def probe_pad_events(self, seconds: float = 6.0) -> dict:
+        return await self.loop.run_in_executor(
+            None, partydeck.probe_pad_events, seconds
+        )
+
     async def create_profile(self, name: str) -> list:
         return await self.loop.run_in_executor(
             None, partydeck.create_profile, name

@@ -184,29 +184,19 @@ export const GameLaunchSettingsPage: FC = () => {
       // controllerIndex — a reconnect between join and Start can change the slot,
       // and the join-time value would be stale. Array order = split order.
       const live = getControllers();
-      const resolved = players.map((p, slot) => {
+      const resolved = players.map((p) => {
         const cur = live.find((c) => c.index === p.controllerIndex);
         return {
-          slot,
           profile: p.profile as string,
           xinput: cur ? cur.xinput : p.xinput,
           serial: cur?.serial ?? "",
         };
       });
-      const payload = resolved.map((p) => ({
-        profile: p.profile,
-        xinput: p.xinput,
-      }));
-      const watchPlayers = resolved.map(({ slot, xinput, serial }) => ({
-        slot,
-        xinput,
-        serial,
-      }));
 
       // Guard: every slot must be valid and unique, or two instances bind the
       // same pad (one player drives both, the other is dead). Abort loudly
       // rather than launch a broken session.
-      const slots = payload.map((p) => p.xinput);
+      const slots = resolved.map((p) => p.xinput);
       if (slots.some((s) => s < 0) || new Set(slots).size !== slots.length) {
         toaster.toast({
           title: "PartyDeck",
@@ -218,7 +208,7 @@ export const GameLaunchSettingsPage: FC = () => {
       // Guard: profiles must be present and distinct. canStart already enforces
       // this so the button is disabled, but re-check in case state changed
       // between render and click (e.g. a player cleared their profile).
-      const profileNames = payload.map((p) => p.profile);
+      const profileNames = resolved.map((p) => p.profile);
       if (
         profileNames.some((p) => !p) ||
         new Set(profileNames).size !== profileNames.length
@@ -229,6 +219,25 @@ export const GameLaunchSettingsPage: FC = () => {
         });
         return;
       }
+
+      if (resolved.some((p) => p.serial === "")) {
+        toaster.toast({
+          title: "PartyDeck",
+          body: "Couldn't identify a controller — reconnect the controllers and try again.",
+        });
+        return;
+      }
+
+      // Each cell adopts its pad's CURRENT slot — never swap at launch, since
+      // Steam's game-session init reverts recent swaps to its per-serial memory.
+      const intended = resolved.map((p, i) => ({
+        slot: i,
+        serial: p.serial,
+      }));
+      const payload = resolved.map((p) => ({
+        profile: p.profile,
+        xinput: p.xinput,
+      }));
 
       // All guards passed — the launch is committed from here.
       playLaunchGameSound();
@@ -244,7 +253,7 @@ export const GameLaunchSettingsPage: FC = () => {
       if (shortcutAppId === null) {
         toaster.toast({ title: "PartyDeck", body: "Failed to launch." });
       } else {
-        startControllerWatch(watchPlayers, shortcutAppId);
+        startControllerWatch(intended, shortcutAppId);
       }
     } catch (e) {
       console.error("[partydeck] launch failed", e);

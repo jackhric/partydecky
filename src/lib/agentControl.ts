@@ -29,11 +29,16 @@ async function onAgentLaunch(payload: AgentLaunchPayload): Promise<void> {
   }
   console.log("PartyDeck: agent_launch received", payload);
   try {
+    // Pads are adopted at their requested slots, never rearranged — the
+    // backend already wrote launch-players.json with the caller's slots.
+    const intended = payload.xinput_slots?.length
+      ? resolvePlayerSerials(payload.xinput_slots)
+      : null;
     const appId = await launchViaShortcut(payload.exe, payload.directory);
     if (appId === null) {
       toaster.toast({ title: "PartyDeck", body: "Agent launch failed to start." });
-    } else if (payload.xinput_slots?.length) {
-      startControllerWatch(resolvePlayerSerials(payload.xinput_slots), appId);
+    } else if (intended) {
+      startControllerWatch(intended, appId);
     }
   } catch (e) {
     console.error("PartyDeck: agent_launch error", e);

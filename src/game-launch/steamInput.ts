@@ -17,8 +17,6 @@ export interface SteamController {
   serial: string;
 }
 
-export const BUTTON_A = 0;
-
 // Subset of the ControllerInputGamepadButton enum (full range 0..50).
 export const GAMEPAD_BUTTON_NAMES: Record<number, string> = {
   0: "A",
@@ -89,16 +87,6 @@ export function registerInput(
 export function identifyController(index: number): void {
   try {
     sc()?.IdentifyController?.(index);
-  } catch {
-    /* ignore */
-  }
-}
-
-// Takes XINPUT slot numbers, not controller indices; acts as a move when one
-// slot is empty. Fire-and-forget — truth is re-reading getControllers().
-export function swapControllerOrder(slotA: number, slotB: number): void {
-  try {
-    sc()?.SwapControllerOrder?.(slotA, slotB);
   } catch {
     /* ignore */
   }
