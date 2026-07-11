@@ -31,6 +31,7 @@ import { playExitMenuSound, playLaunchGameSound } from "./navSound";
 import { getControllers } from "./steamInput";
 import { FaDownload, FaExclamationTriangle } from "react-icons/fa";
 import { PartyDeckHeader } from "../lib/PartyDeckHeader";
+import { ExitButton } from "./ExitButton";
 import { PlayerGrid } from "./PlayerGrid";
 import { StartButton } from "./StartButton";
 import { usePlayerLobby } from "./usePlayerLobby";
@@ -287,7 +288,10 @@ export const GameLaunchSettingsPage: FC = () => {
         }
         right={
           handler ? (
-            <StartButton canStart={canStart} onStart={onStart} />
+            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+              <ExitButton holding={exitRemainingMs !== null} />
+              <StartButton canStart={canStart} onStart={onStart} />
+            </div>
           ) : (
             <span style={{ fontSize: "1.1rem", opacity: 0.7, fontWeight: 600 }}>
               PartyDeck
@@ -442,7 +446,6 @@ export const GameLaunchSettingsPage: FC = () => {
             players={players}
             profiles={profiles}
             avatars={avatars}
-            exitRemainingMs={exitRemainingMs}
             leavingControllers={leavingControllers}
             onProfileChange={setProfile}
             onOpenSettings={() =>

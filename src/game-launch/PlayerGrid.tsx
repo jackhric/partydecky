@@ -1,16 +1,19 @@
 import { DialogButton, Focusable } from "@decky/ui";
 import { FC } from "react";
 import { FaCog, FaGamepad } from "react-icons/fa";
-import { PlayerCell } from "./PlayerCell";
+import { NO_PROFILE_STYLE, PlayerCell } from "./PlayerCell";
 import type { Player } from "./usePlayerLobby";
+
+// Steam's own A-button glyph, served at the loopback origin (same place its
+// footer legends pull from). Resolution-independent SVG.
+const A_BUTTON_GLYPH =
+  "https://steamloopback.host/steaminputglyphs/shared_button_a.svg";
 
 interface Props {
   players: Player[];
   profiles: string[];
   /** Profile name -> avatar data-URL, for profiles that have one. */
   avatars: Map<string, string>;
-  /** Ms left in the hold-B-to-exit countdown, or null when B isn't held. */
-  exitRemainingMs: number | null;
   /** Controllers currently mid B-hold to leave (drives the cell indicator). */
   leavingControllers: Set<number>;
   onProfileChange: (controllerIndex: number, profile: string | null) => void;
@@ -27,7 +30,6 @@ export const PlayerGrid: FC<Props> = ({
   players,
   profiles,
   avatars,
-  exitRemainingMs,
   leavingControllers,
   onProfileChange,
   onOpenSettings,
@@ -94,13 +96,22 @@ export const PlayerGrid: FC<Props> = ({
         }}
       >
         <FaGamepad size={48} />
-        <div style={{ fontSize: "1.1rem", fontWeight: 600 }}>
-          Press A on a controller to join
-        </div>
-        <div style={{ fontSize: "0.9rem" }}>
-          {exitRemainingMs !== null
-            ? `Exiting in ${(exitRemainingMs / 1000).toFixed(1)}...`
-            : "Hold B to exit"}
+        <div
+          style={{
+            fontSize: "1.1rem",
+            fontWeight: 600,
+            display: "flex",
+            alignItems: "center",
+            gap: "0.4rem",
+          }}
+        >
+          Press
+          <img
+            src={A_BUTTON_GLYPH}
+            alt="A"
+            style={{ height: "1.25em", width: "1.25em" }}
+          />
+          on a controller to join
         </div>
       </Focusable>
     );
@@ -122,6 +133,7 @@ export const PlayerGrid: FC<Props> = ({
         gap: "1rem",
       }}
     >
+      {NO_PROFILE_STYLE}
       {players.map((p, i) => (
         <PlayerCell
           key={p.controllerIndex}

@@ -25,7 +25,8 @@ const BUTTON_R1 = 31;
 const ARMING_DELAY_MS = 500;
 // Exported so PlayerCell's hold indicator animates over the same duration.
 export const LEAVE_HOLD_MS = 250;
-const EXIT_HOLD_MS = 2000;
+// Exported so the header exit indicator sweeps its fill over the same duration.
+export const EXIT_HOLD_MS = 2000;
 const EXIT_TICK_MS = 100;
 // A tick gap this large means the CEF context was throttled/suspended mid-hold;
 // cancel rather than fire a stale exit on resume.

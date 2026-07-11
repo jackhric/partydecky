@@ -6,8 +6,8 @@ import {
   showContextMenu,
 } from "@decky/ui";
 import { FC, useCallback, useEffect, useRef, useState } from "react";
-import { FaGamepad, FaSearch, FaUser } from "react-icons/fa";
-import { controllerTypeName } from "./controllerType";
+import { FaBan, FaSearch, FaUser } from "react-icons/fa";
+import { controllerTypeImage, controllerTypeName } from "./controllerType";
 import { identifyController } from "./steamInput";
 import { LEAVE_HOLD_MS, type Player } from "./usePlayerLobby";
 
@@ -20,6 +20,22 @@ const B_BUTTON_GLYPH =
 // to avoid a deep-import of the enum from @decky/ui/dist internals.
 const GAMEPAD_OK = 1;
 const HOLD_OPEN_MS = 500;
+
+// Slight breathing yellow outline flagging a slot with no profile picked yet.
+// Rendered once by PlayerGrid; each profile-less cell opts in via className.
+export const NO_PROFILE_STYLE = (
+  <style>
+    {`
+      @keyframes partydeck-no-profile-breathe {
+        0%, 100% { border-color: rgba(255, 214, 10, 0.25); }
+        50% { border-color: rgba(255, 214, 10, 0.7); }
+      }
+      .partydeck-no-profile {
+        animation: partydeck-no-profile-breathe 2.4s ease-in-out infinite;
+      }
+    `}
+  </style>
+);
 
 type GamepadEvent = CustomEvent<{ button: number; is_repeat?: boolean }>;
 
@@ -143,10 +159,14 @@ export const PlayerCell: FC<Props> = ({
           selected={player.profile === null}
           onSelected={() => onProfileChange(null)}
         >
-          None
+          <span style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
+            <FaBan size={24} style={{ opacity: 0.4, flexShrink: 0 }} />
+            <span>None</span>
+          </span>
         </MenuItem>
         {profiles.map((p) => {
           const taken = takenProfiles.has(p);
+          const src = avatars.get(p) ?? null;
           return (
             <MenuItem
               key={p}
@@ -156,7 +176,24 @@ export const PlayerCell: FC<Props> = ({
                 if (!taken) onProfileChange(p);
               }}
             >
-              {taken ? `${p} (in use)` : p}
+              <span
+                style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}
+              >
+                {src ? (
+                  <img
+                    src={src}
+                    style={{
+                      width: "24px",
+                      height: "24px",
+                      objectFit: "cover",
+                      flexShrink: 0,
+                    }}
+                  />
+                ) : (
+                  <FaUser size={24} style={{ opacity: 0.4, flexShrink: 0 }} />
+                )}
+                <span>{taken ? `${p} (in use)` : p}</span>
+              </span>
             </MenuItem>
           );
         })}
@@ -167,13 +204,18 @@ export const PlayerCell: FC<Props> = ({
 
   return (
     <Focusable
+      className={player.profile ? undefined : "partydeck-no-profile"}
       style={{
+        position: "relative",
+        overflow: "hidden",
         display: "flex",
         flexDirection: "column",
         gap: "0.75rem",
         padding: "1rem",
         borderRadius: "0px",
-        background: "rgba(255,255,255,0.06)",
+        background: player.profile
+          ? "rgba(255,255,255,0.06)"
+          : "linear-gradient(rgba(255,214,10,0.03), rgba(255,214,10,0.18)), rgba(255,255,255,0.06)",
         border: "1px solid rgba(255,255,255,0.1)",
         // Grid items default to min-height:auto, which lets content push the
         // row taller than its 1fr track and overflow the page. minHeight:0
@@ -182,8 +224,29 @@ export const PlayerCell: FC<Props> = ({
         boxSizing: "border-box",
       }}
     >
+      {/* Oversized controller silhouette bleeding off the bottom-right corner as
+          a faint watermark. brightness(0) invert(1) flattens the render to a
+          solid white shape regardless of the source art's colors. */}
+      <img
+        src={controllerTypeImage(player.controllerType)}
+        alt=""
+        aria-hidden
+        style={{
+          position: "absolute",
+          right: "-12%",
+          bottom: "-10%",
+          height: "70%",
+          width: "auto",
+          transform: "scale(.5)",
+          transformOrigin: "bottom right",
+          filter: "brightness(0) invert(1)",
+          opacity: 0.05,
+          pointerEvents: "none",
+        }}
+      />
       <div
         style={{
+          position: "relative",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
@@ -236,6 +299,7 @@ export const PlayerCell: FC<Props> = ({
         style={
           compact
             ? {
+                position: "relative",
                 flex: 1,
                 display: "flex",
                 alignItems: "center",
@@ -243,6 +307,7 @@ export const PlayerCell: FC<Props> = ({
                 minHeight: 0,
               }
             : {
+                position: "relative",
                 flex: 1,
                 display: "flex",
                 flexDirection: "column",
@@ -261,7 +326,15 @@ export const PlayerCell: FC<Props> = ({
             transform: `translateX(${glyphX}px) rotate(${glyphX * 0.6}deg)`,
           }}
         >
-          <FaGamepad size={compact ? 40 : 48} />
+          <img
+            src={controllerTypeImage(player.controllerType)}
+            alt={controllerTypeName(player.controllerType)}
+            style={{
+              height: compact ? "40px" : "56px",
+              width: "auto",
+              objectFit: "contain",
+            }}
+          />
         </span>
         <div
           style={
@@ -286,7 +359,12 @@ export const PlayerCell: FC<Props> = ({
       </div>
 
       <Focusable
-        style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}
+        style={{
+          position: "relative",
+          display: "flex",
+          gap: "0.5rem",
+          alignItems: "center",
+        }}
       >
         {avatar && (
           <img
